@@ -1,0 +1,198 @@
+# thoth/instrumentor.py
+from __future__ import annotations
+
+import os
+from typing import Any, cast
+
+from thoth._context import _CURRENT_SESSION
+from thoth.emitter import HttpEmitter
+from thoth.enforcer_client import EnforcerClient
+from thoth.models import EnforcementMode, ThothConfig
+from thoth.session import SessionContext
+from thoth.step_up import StepUpClient
+from thoth.tracer import Tracer
+
+
+def _build_components(
+    agent_id: str,
+    approved_scope: list[str],
+    tenant_id: str,
+    user_id: str,
+    enforcement: str,
+    api_key: str | None,
+    session_id: str | None,
+) -> tuple[ThothConfig, SessionContext, HttpEmitter, EnforcerClient, StepUpClient, Tracer]:
+    """Construct the full Thoth component stack from caller parameters."""
+    resolved_api_key = api_key or os.getenv("THOTH_API_KEY")
+    config = ThothConfig(
+        agent_id=agent_id,
+        approved_scope=approved_scope,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        enforcement=EnforcementMode(enforcement),
+        api_key=resolved_api_key,
+    )
+    session = SessionContext(config, session_id=session_id)
+    _CURRENT_SESSION.set(session)
+    emitter = HttpEmitter(api_url=config.resolved_api_url, api_key=resolved_api_key or "")
+    enforcer = EnforcerClient(config)
+    step_up = StepUpClient(config)
+    tracer = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
+    return config, session, emitter, enforcer, step_up, tracer
+
+
+def instrument(
+    agent: Any,
+    *,
+    agent_id: str,
+    approved_scope: list[str],
+    tenant_id: str,
+    user_id: str = "system",
+    enforcement: str = "progressive",
+    api_key: str | None = None,
+    session_id: str | None = None,
+) -> Any:
+    """
+    Instrument an AI agent with Thoth governance.
+    Wraps all tools with enforce/emit hooks. Returns the same agent object.
+    """
+    _, _, _, _, _, tracer = _build_components(
+        agent_id,
+        approved_scope,
+        tenant_id,
+        user_id,
+        enforcement,
+        api_key,
+        session_id,
+    )
+    _wrap_agent_tools(agent, tracer)
+    return agent
+
+
+def instrument_anthropic(
+    tool_fns: dict[str, Any],
+    *,
+    agent_id: str,
+    approved_scope: list[str],
+    tenant_id: str,
+    user_id: str = "system",
+    enforcement: str = "progressive",
+    api_key: str | None = None,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Instrument tool functions for use in an Anthropic Claude agentic loop.
+
+    Wraps each callable in *tool_fns* with policy enforcement and behavioral
+    event emission. Returns a new dict with the same keys but governed callables.
+
+    Args:
+        tool_fns: Mapping of tool name → callable (receives the ``input`` dict
+            from a Claude ``tool_use`` content block).
+        agent_id: Unique identifier for this agent.
+        approved_scope: List of tool names that are in-policy.
+        tenant_id: Your Thoth tenant identifier.
+        user_id: User initiating the session. Defaults to ``"system"``.
+        enforcement: ``"observe"`` | ``"block"`` | ``"step_up"`` |
+            ``"progressive"`` (default).
+        api_key: Thoth API key (or set ``THOTH_API_KEY`` env var).
+        session_id: Optional session ID; generated automatically if omitted.
+
+    Returns:
+        Dict of governance-wrapped callables keyed by tool name.
+    """
+    from thoth.integrations.anthropic import wrap_anthropic_tools
+
+    _, _, _, _, _, tracer = _build_components(
+        agent_id,
+        approved_scope,
+        tenant_id,
+        user_id,
+        enforcement,
+        api_key,
+        session_id,
+    )
+    return cast(dict[str, Any], wrap_anthropic_tools(tool_fns, tracer))
+
+
+def instrument_openai(
+    tool_fns: dict[str, Any],
+    *,
+    agent_id: str,
+    approved_scope: list[str],
+    tenant_id: str,
+    user_id: str = "system",
+    enforcement: str = "progressive",
+    api_key: str | None = None,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Instrument tool functions for use in an OpenAI tool-calling loop.
+
+    Wraps each callable in *tool_fns* with policy enforcement and behavioral
+    event emission. Returns a new dict with the same keys but governed callables.
+
+    Args:
+        tool_fns: Mapping of tool name → callable (receives the parsed
+            arguments dict from an OpenAI ``tool_calls`` entry).
+        agent_id: Unique identifier for this agent.
+        approved_scope: List of tool names that are in-policy.
+        tenant_id: Your Thoth tenant identifier.
+        user_id: User initiating the session. Defaults to ``"system"``.
+        enforcement: ``"observe"`` | ``"block"`` | ``"step_up"`` |
+            ``"progressive"`` (default).
+        api_key: Thoth API key (or set ``THOTH_API_KEY`` env var).
+        session_id: Optional session ID; generated automatically if omitted.
+
+    Returns:
+        Dict of governance-wrapped callables keyed by tool name.
+    """
+    from thoth.integrations.openai import wrap_openai_tools
+
+    _, _, _, _, _, tracer = _build_components(
+        agent_id,
+        approved_scope,
+        tenant_id,
+        user_id,
+        enforcement,
+        api_key,
+        session_id,
+    )
+    return cast(dict[str, Any], wrap_openai_tools(tool_fns, tracer))
+
+
+def _wrap_agent_tools(agent: Any, tracer: Tracer) -> None:
+    """Wrap tools on common agent shapes. Extend for each framework."""
+    # LangChain AgentExecutor
+    try:
+        from langchain.agents import AgentExecutor  # type: ignore[import-not-found]
+
+        if isinstance(agent, AgentExecutor):
+            from thoth.integrations.langchain import wrap_langchain_agent
+
+            wrap_langchain_agent(agent, tracer)
+            return
+    except ImportError:
+        pass
+
+    # CrewAI Agent
+    try:
+        from crewai import Agent as CrewAgent  # type: ignore[import-not-found]
+
+        if isinstance(agent, CrewAgent):
+            from thoth.integrations.crewai import wrap_crewai_agent
+
+            wrap_crewai_agent(agent, tracer)
+            return
+    except ImportError:
+        pass
+
+    # Generic: any object with a .tools list
+    tools = getattr(agent, "tools", None)
+    if not tools:
+        return
+    for tool in tools:
+        tool_name = getattr(tool, "name", str(tool))
+        original_run = getattr(tool, "run", None) or (tool if callable(tool) else None)
+        if original_run:
+            wrapped = tracer.wrap_tool(tool_name, original_run)
+            attr = "run" if hasattr(tool, "run") else "__call__"
+            setattr(tool, attr, wrapped)

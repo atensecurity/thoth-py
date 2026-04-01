@@ -1,0 +1,184 @@
+# tests/test_tracer.py
+import asyncio
+from unittest.mock import MagicMock
+
+import pytest
+from thoth import ThothPolicyViolation
+from thoth.emitter import SqsEmitter
+from thoth.enforcer_client import EnforcerClient
+from thoth.models import DecisionType, EnforcementDecision, EnforcementMode, ThothConfig
+from thoth.session import SessionContext
+from thoth.step_up import StepUpClient
+from thoth.tracer import Tracer
+
+
+@pytest.fixture
+def config():
+    return ThothConfig(
+        agent_id="test-agent",
+        approved_scope=["read:data"],
+        tenant_id="trantor",
+        enforcement=EnforcementMode.BLOCK,
+    )
+
+
+@pytest.fixture
+def tracer(config):
+    session = SessionContext(config)
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    step_up = MagicMock(spec=StepUpClient)
+    enforcer.check.return_value = EnforcementDecision(decision=DecisionType.ALLOW)
+    return Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
+
+
+def test_allows_in_scope_tool(tracer):
+    tool = MagicMock(return_value="invoice data")
+    wrapped = tracer.wrap_tool("read:data", tool)
+    result = wrapped("arg1")
+    assert result == "invoice data"
+    tool.assert_called_once_with("arg1")
+
+
+def test_emits_pre_and_post_events(tracer):
+    tool = MagicMock(return_value="ok")
+    wrapped = tracer.wrap_tool("read:data", tool)
+    wrapped()
+    assert tracer._emitter.emit.call_count == 2  # PRE + POST
+
+
+def test_records_tool_call_in_session(tracer):
+    tool = MagicMock(return_value="ok")
+    wrapped = tracer.wrap_tool("read:data", tool)
+    wrapped()
+    assert "read:data" in tracer._session.tool_calls
+
+
+def test_raises_policy_violation_on_block(config):
+    session = SessionContext(config)
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    step_up = MagicMock(spec=StepUpClient)
+    enforcer.check.return_value = EnforcementDecision(
+        decision=DecisionType.BLOCK,
+        reason="out of scope",
+        violation_id="vio_123",
+    )
+    t = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
+    tool = MagicMock()
+    wrapped = t.wrap_tool("write:s3", tool)
+    with pytest.raises(ThothPolicyViolation) as exc:
+        wrapped()
+    assert "write:s3" in str(exc.value)
+    tool.assert_not_called()  # tool never ran
+
+
+def test_waits_for_step_up_then_allows(config):
+    config.enforcement = EnforcementMode.STEP_UP
+    session = SessionContext(config)
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    step_up = MagicMock(spec=StepUpClient)
+
+    enforcer.check.return_value = EnforcementDecision(decision=DecisionType.STEP_UP, hold_token="tok_abc")
+    step_up.wait.return_value = EnforcementDecision(decision=DecisionType.ALLOW)
+
+    t = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
+    tool = MagicMock(return_value="done")
+    wrapped = t.wrap_tool("write:slack", tool)
+    result = wrapped()
+    assert result == "done"
+    step_up.wait.assert_called_once_with("tok_abc")
+
+
+def test_observe_mode_allows_out_of_scope(config):
+    config.enforcement = EnforcementMode.OBSERVE
+    session = SessionContext(config)
+    emitter = MagicMock(spec=SqsEmitter)
+    # Enforcer not called in observe mode
+    enforcer = MagicMock(spec=EnforcerClient)
+    step_up = MagicMock(spec=StepUpClient)
+
+    t = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
+    tool = MagicMock(return_value="ok")
+    wrapped = t.wrap_tool("write:s3", tool)
+    result = wrapped()
+    assert result == "ok"
+    enforcer.check.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_wrap_async_tool_executes(base_config):
+    """wrap_tool must await async functions using the non-blocking async enforce path."""
+    from unittest.mock import AsyncMock
+
+    session = SessionContext(base_config)
+    emitter = SqsEmitter(queue_url=None)
+    enforcer = MagicMock(spec=EnforcerClient)
+    # Async wrapped tools call acheck, not check.
+    enforcer.acheck = AsyncMock(return_value=EnforcementDecision(decision=DecisionType.ALLOW))
+    step_up = MagicMock(spec=StepUpClient)
+    tracer = Tracer(
+        config=base_config,
+        session=session,
+        emitter=emitter,
+        enforcer=enforcer,
+        step_up=step_up,
+    )
+
+    async def async_tool(x: int) -> int:
+        return x * 2
+
+    wrapped = tracer.wrap_tool("async_tool", async_tool)
+    result = await wrapped(5)
+    assert result == 10  # would be coroutine object if not properly awaited
+    enforcer.acheck.assert_awaited_once()
+    enforcer.check.assert_not_called()  # sync path must not be invoked for async tools
+
+
+@pytest.mark.asyncio
+async def test_async_tool_blocked_raises(base_config):
+    """Async wrapped tools raise ThothPolicyViolation on BLOCK via the async enforce path."""
+    from unittest.mock import AsyncMock
+
+    session = SessionContext(base_config)
+    emitter = SqsEmitter(queue_url=None)
+    enforcer = MagicMock(spec=EnforcerClient)
+    enforcer.acheck = AsyncMock(return_value=EnforcementDecision(decision=DecisionType.BLOCK, reason="async blocked"))
+    step_up = MagicMock(spec=StepUpClient)
+    tracer = Tracer(
+        config=base_config,
+        session=session,
+        emitter=emitter,
+        enforcer=enforcer,
+        step_up=step_up,
+    )
+
+    async def async_tool() -> str:
+        return "should not reach"
+
+    wrapped = tracer.wrap_tool("async_tool", async_tool)
+    with pytest.raises(ThothPolicyViolation):
+        await wrapped()
+
+
+def test_wrap_tool_preserves_name(base_config):
+    """functools.wraps must preserve the function name."""
+    session = SessionContext(base_config)
+    emitter = SqsEmitter(queue_url=None)
+    enforcer = MagicMock(spec=EnforcerClient)
+    enforcer.check.return_value = EnforcementDecision(decision=DecisionType.ALLOW)
+    step_up = MagicMock(spec=StepUpClient)
+    tracer = Tracer(
+        config=base_config,
+        session=session,
+        emitter=emitter,
+        enforcer=enforcer,
+        step_up=step_up,
+    )
+
+    def my_named_tool() -> None:
+        pass
+
+    wrapped = tracer.wrap_tool("my_named_tool", my_named_tool)
+    assert wrapped.__name__ == "my_named_tool"
