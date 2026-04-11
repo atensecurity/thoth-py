@@ -61,13 +61,14 @@ pip install "aten-thoth[autogen]"
 
 ## Quick Start
 
-**1. Get your API key** from the [Aten Security dashboard](https://app.aten.security) under
+**1. Get your API key** from your Thoth dashboard at `https://<tenant>.<apex-domain>` under
 **Settings → API Keys**.
 
-**2. Set the environment variable:**
+**2. Set environment variables:**
 
 ```bash
 export THOTH_API_KEY="thoth_live_..."
+export THOTH_API_URL="https://enforce.<tenant>.<apex-domain>"
 ```
 
 **3. Instrument your agent — three lines of code:**
@@ -82,6 +83,7 @@ agent = thoth.instrument(
     agent_id="document-summarizer",
     approved_scope=["read_file", "summarize"],   # tools outside this list are blocked
     tenant_id=os.environ["THOTH_TENANT_ID"],
+    api_url=os.environ["THOTH_API_URL"],
     user_id="alice@example.com",
     enforcement="progressive",   # observe → step_up → block
     # api_key set via THOTH_API_KEY env var
@@ -91,8 +93,8 @@ agent = thoth.instrument(
 result = agent.run("Summarize the attached document and send it to the team.")
 ```
 
-That's it. No AWS credentials, no infrastructure setup — the SDK connects to Aten's managed
-service using your API key and sends events and enforcement requests over HTTPS.
+That's it. No AWS credentials, no infrastructure setup — the SDK sends events and enforcement
+requests over HTTPS to your tenant API URL.
 
 ---
 
@@ -508,6 +510,7 @@ if session:
 | `user_id` | `str` | `"system"` | Identity of the user on whose behalf the agent acts. |
 | `enforcement` | `str` | `"progressive"` | Enforcement mode: `observe`, `step_up`, `block`, or `progressive`. |
 | `api_key` | `str \| None` | `$THOTH_API_KEY` | API key from the Aten dashboard. Events sent over HTTPS — no AWS credentials required. |
+| `api_url` | `str \| None` | `$THOTH_API_URL` | Required tenant API base URL used for both event ingestion and policy checks. |
 | `session_id` | `str \| None` | auto-generated UUID | Pass an existing session ID to continue a session across calls. |
 
 ### `ThothConfig` fields
@@ -520,7 +523,7 @@ if session:
 | `user_id` | `str` | `"system"` | User identity for the session. |
 | `enforcement` | `EnforcementMode` | `PROGRESSIVE` | Enforcement mode. |
 | `api_key` | `str \| None` | `None` | Aten API key. Falls back to `THOTH_API_KEY` env var via `_build_components`. |
-| `api_url` | `str` | `https://api.aten.security` | Base URL for the Aten managed API. Override via `THOTH_API_URL` env var. |
+| `api_url` | `str \| None` | `None` | Required tenant API base URL. Provide directly or via `THOTH_API_URL`. Used for both `/v1/enforce` and `/v1/events/batch`. |
 | `step_up_timeout_minutes` | `int` | `15` | Timeout for step-up approval. |
 | `step_up_poll_interval_seconds` | `int` | `5` | Polling interval for step-up hold status. |
 
@@ -529,17 +532,17 @@ if session:
 | Variable | Description |
 |---|---|
 | `THOTH_API_KEY` | API key from the Aten dashboard. Enables HTTPS event transport. Example: `thoth_live_abc123...` |
-| `THOTH_API_URL` | Override the Aten API base URL. Useful for self-hosted deployments. Example: `https://thoth.your-domain.com` |
-| `THOTH_ENFORCER_URL` | Override the enforcer URL. Defaults to the Aten API when `api_key` is set. Example: `https://enforcer.your-domain.com` |
+| `THOTH_API_URL` | Required tenant API base URL for both event ingestion and policy checks. Example: `https://enforce.<tenant>.<apex-domain>` |
 
-When both an explicit parameter and an environment variable are set, the explicit parameter takes precedence.
+Resolution precedence:
+- `THOTH_API_URL` overrides `api_url`.
 
 ---
 
 ## Dashboard
 
-View sessions, violations, step-up requests, and policy decisions in the
-[Maat Governance Dashboard](https://app.aten.security).
+View sessions, violations, step-up requests, and policy decisions in your Thoth dashboard at
+`https://<tenant>.<apex-domain>`.
 
 The dashboard shows:
 - **Sessions** — per-agent session timelines with all tool calls

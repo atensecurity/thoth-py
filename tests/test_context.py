@@ -19,7 +19,7 @@ def test_get_current_session_returns_set_session():
         approved_scope=[],
         tenant_id="t",
         enforcement=EnforcementMode.OBSERVE,
-        enforcer_url="http://x",
+        api_url="http://x",
         sqs_queue_url=None,
     )
     session = SessionContext(config)

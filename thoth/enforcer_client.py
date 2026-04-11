@@ -18,14 +18,13 @@ class EnforcerClient:
     def __init__(self, config: ThothConfig) -> None:
         self._config = config
         headers = {"x-api-key": config.api_key} if config.api_key else {}
-        # resolved_enforcer_url is a @property that checks THOTH_ENFORCER_URL at call time,
-        # so the client is built with the correct URL even when the env var is set after import.
+        # resolved_enforcer_url follows the single-URL contract and mirrors resolved_api_url.
         enforcer_url = config.resolved_enforcer_url
         self._http = httpx.Client(base_url=enforcer_url, headers=headers, timeout=_TIMEOUT)
         self._async_http = httpx.AsyncClient(base_url=enforcer_url, headers=headers, timeout=_TIMEOUT)
 
     def _payload(self, tool_name: str, session_id: str, tool_calls: list[str]) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "agent_id": self._config.agent_id,
             "tenant_id": self._config.tenant_id,
             "user_id": self._config.user_id,
@@ -35,6 +34,9 @@ class EnforcerClient:
             "approved_scope": self._config.approved_scope,
             "enforcement_mode": self._config.enforcement.value,
         }
+        if self._config.session_intent is not None:
+            payload["session_intent"] = self._config.session_intent
+        return payload
 
     def check(
         self,

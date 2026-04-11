@@ -27,6 +27,7 @@ def test_langchain_agent_executor_instrumented():
             agent_id="lc-agent",
             approved_scope=["search"],
             tenant_id="trantor",
+            api_url="https://enforcer.example",
         )
         result = executor.tools[0].run("test query")
         assert result == "results:test query"

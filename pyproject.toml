@@ -2,6 +2,9 @@
 build-backend = "poetry_dynamic_versioning.backend"
 requires = ["poetry-core>=1.8.3", "poetry-dynamic-versioning>=1.0.0,<2.0.0"]
 
+[tool.codespell]
+ignore-words-list = "checkin"
+
 [tool.poe.tasks]
 install = ["lock", "update", "install_dev"]
 install_dev = "poetry install --with dev"
@@ -18,7 +21,7 @@ description = "AI agent governance SDK by Aten Security"
 name = "aten-thoth"
 packages = [{include = "thoth"}]
 readme = "README.md"
-version = "0.1.1"
+version = "0.1.2"
 
 [tool.poetry.dependencies]
 anyio = ">=4.0"
@@ -32,6 +35,9 @@ anthropic = ["anthropic"]
 autogen = ["pyautogen"]
 langchain = ["langchain-core"]
 openai = ["openai"]
+
+[tool.poetry.group.codespell.dependencies]
+codespell = "2.4.2"
 
 [tool.poetry.group.dev.dependencies]
 moto = {extras = ["sqs"], version = "==5.1.22"}

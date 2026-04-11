@@ -10,5 +10,5 @@ def base_config():
         approved_scope=["read:data", "write:slack"],
         tenant_id="trantor",
         enforcement=EnforcementMode.BLOCK,
-        enforcer_url="http://enforcer:8080",
+        api_url="http://enforcer:8080",
     )

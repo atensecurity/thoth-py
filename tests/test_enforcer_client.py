@@ -12,12 +12,13 @@ def config():
         agent_id="test-agent",
         approved_scope=["read:data"],
         tenant_id="trantor",
+        api_url="http://enforcer:8080",
     )
 
 
 @respx.mock
 def test_returns_allow_decision(config):
-    respx.post("http://enforcer:8080/v1/enforce").mock(return_value=httpx.Response(200, json={"decision": "ALLOW"}))
+    respx.post(f"{config.resolved_enforcer_url}/v1/enforce").mock(return_value=httpx.Response(200, json={"decision": "ALLOW"}))
     client = EnforcerClient(config)
     decision = client.check("read:data", session_id="sess_1", tool_calls=[])
     assert decision.is_allow
@@ -25,7 +26,7 @@ def test_returns_allow_decision(config):
 
 @respx.mock
 def test_returns_block_decision(config):
-    respx.post("http://enforcer:8080/v1/enforce").mock(
+    respx.post(f"{config.resolved_enforcer_url}/v1/enforce").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -44,7 +45,7 @@ def test_returns_block_decision(config):
 @respx.mock
 def test_falls_back_to_allow_on_http_error(config):
     """Non-fatal: enforcer unreachable -> allow (observe fallback)."""
-    respx.post("http://enforcer:8080/v1/enforce").mock(side_effect=httpx.ConnectError("refused"))
+    respx.post(f"{config.resolved_enforcer_url}/v1/enforce").mock(side_effect=httpx.ConnectError("refused"))
     client = EnforcerClient(config)
     decision = client.check("read:data", session_id="sess_1", tool_calls=[])
     assert decision.is_allow  # fallback, not an exception
@@ -52,7 +53,7 @@ def test_falls_back_to_allow_on_http_error(config):
 
 @respx.mock
 def test_falls_back_to_allow_on_timeout(config):
-    respx.post("http://enforcer:8080/v1/enforce").mock(side_effect=httpx.TimeoutException("timeout"))
+    respx.post(f"{config.resolved_enforcer_url}/v1/enforce").mock(side_effect=httpx.TimeoutException("timeout"))
     client = EnforcerClient(config)
     decision = client.check("read:data", session_id="sess_1", tool_calls=[])
     assert decision.is_allow

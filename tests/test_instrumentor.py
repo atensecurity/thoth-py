@@ -26,6 +26,7 @@ def test_instrument_returns_agent():
         agent_id="my-agent",
         approved_scope=["read:data"],
         tenant_id="trantor",
+        api_url="https://enforcer.example",
     )
     assert result is agent  # returns same object, mutated
 
@@ -39,6 +40,7 @@ def test_instrument_wraps_tools():
             agent_id="my-agent",
             approved_scope=["read:data"],
             tenant_id="trantor",
+            api_url="https://enforcer.example",
         )
         # Tool should still be callable
         result = agent.tools[0].run("test")
@@ -59,6 +61,7 @@ def test_instrument_raises_on_block():
             approved_scope=[],  # nothing allowed
             tenant_id="trantor",
             enforcement="block",
+            api_url="https://enforcer.example",
         )
         with pytest.raises(ThothPolicyViolation):
             agent.tools[0].run("test")

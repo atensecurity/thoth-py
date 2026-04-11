@@ -20,10 +20,15 @@ def _build_components(
     user_id: str,
     enforcement: str,
     api_key: str | None,
+    api_url: str | None,
     session_id: str | None,
+    session_intent: str | None = None,
 ) -> tuple[ThothConfig, SessionContext, HttpEmitter, EnforcerClient, StepUpClient, Tracer]:
     """Construct the full Thoth component stack from caller parameters."""
     resolved_api_key = api_key or os.getenv("THOTH_API_KEY")
+    resolved_api_url = (api_url or os.getenv("THOTH_API_URL") or "").strip()
+    if not resolved_api_url:
+        raise ValueError("Thoth API URL is required (pass api_url or set THOTH_API_URL)")
     config = ThothConfig(
         agent_id=agent_id,
         approved_scope=approved_scope,
@@ -31,6 +36,8 @@ def _build_components(
         user_id=user_id,
         enforcement=EnforcementMode(enforcement),
         api_key=resolved_api_key,
+        api_url=resolved_api_url,
+        session_intent=session_intent,
     )
     session = SessionContext(config, session_id=session_id)
     _CURRENT_SESSION.set(session)
@@ -50,11 +57,19 @@ def instrument(
     user_id: str = "system",
     enforcement: str = "progressive",
     api_key: str | None = None,
+    api_url: str | None = None,
     session_id: str | None = None,
+    session_intent: str | None = None,
 ) -> Any:
     """
     Instrument an AI agent with Thoth governance.
     Wraps all tools with enforce/emit hooks. Returns the same agent object.
+
+    Args:
+        session_intent: Declares the purpose of this session for HIPAA minimum-necessary
+            enforcement. When the active compliance pack defines ``session_scopes``,
+            tools outside the declared intent scope are step-up-challenged even if
+            they appear in ``approved_scope``. Example: ``"phi_eligibility_check"``.
     """
     _, _, _, _, _, tracer = _build_components(
         agent_id,
@@ -63,7 +78,9 @@ def instrument(
         user_id,
         enforcement,
         api_key,
+        api_url,
         session_id,
+        session_intent,
     )
     _wrap_agent_tools(agent, tracer)
     return agent
@@ -78,7 +95,9 @@ def instrument_anthropic(
     user_id: str = "system",
     enforcement: str = "progressive",
     api_key: str | None = None,
+    api_url: str | None = None,
     session_id: str | None = None,
+    session_intent: str | None = None,
 ) -> dict[str, Any]:
     """Instrument tool functions for use in an Anthropic Claude agentic loop.
 
@@ -95,7 +114,11 @@ def instrument_anthropic(
         enforcement: ``"observe"`` | ``"block"`` | ``"step_up"`` |
             ``"progressive"`` (default).
         api_key: Thoth API key (or set ``THOTH_API_KEY`` env var).
+        api_url: Optional tenant API base URL for both event ingestion and
+            policy checks.
         session_id: Optional session ID; generated automatically if omitted.
+        session_intent: Declares the purpose of this session for HIPAA
+            minimum-necessary enforcement (e.g. ``"phi_eligibility_check"``).
 
     Returns:
         Dict of governance-wrapped callables keyed by tool name.
@@ -109,7 +132,9 @@ def instrument_anthropic(
         user_id,
         enforcement,
         api_key,
+        api_url,
         session_id,
+        session_intent,
     )
     return cast(dict[str, Any], wrap_anthropic_tools(tool_fns, tracer))
 
@@ -123,7 +148,9 @@ def instrument_openai(
     user_id: str = "system",
     enforcement: str = "progressive",
     api_key: str | None = None,
+    api_url: str | None = None,
     session_id: str | None = None,
+    session_intent: str | None = None,
 ) -> dict[str, Any]:
     """Instrument tool functions for use in an OpenAI tool-calling loop.
 
@@ -140,7 +167,11 @@ def instrument_openai(
         enforcement: ``"observe"`` | ``"block"`` | ``"step_up"`` |
             ``"progressive"`` (default).
         api_key: Thoth API key (or set ``THOTH_API_KEY`` env var).
+        api_url: Optional tenant API base URL for both event ingestion and
+            policy checks.
         session_id: Optional session ID; generated automatically if omitted.
+        session_intent: Declares the purpose of this session for HIPAA
+            minimum-necessary enforcement (e.g. ``"phi_eligibility_check"``).
 
     Returns:
         Dict of governance-wrapped callables keyed by tool name.
@@ -154,7 +185,9 @@ def instrument_openai(
         user_id,
         enforcement,
         api_key,
+        api_url,
         session_id,
+        session_intent,
     )
     return cast(dict[str, Any], wrap_openai_tools(tool_fns, tracer))
 

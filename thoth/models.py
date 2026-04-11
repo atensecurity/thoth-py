@@ -65,9 +65,6 @@ class BehavioralEvent(BaseModel):
         return self
 
 
-_HOSTED_API_URL = "https://api.aten.security"
-
-
 class ThothConfig(BaseModel):
     agent_id: str
     approved_scope: list[str]
@@ -77,25 +74,27 @@ class ThothConfig(BaseModel):
     # Supply THOTH_API_KEY to use Aten's managed service.
     # Events are sent over HTTPS; no AWS credentials required.
     api_key: str | None = None
-    api_url: str = _HOSTED_API_URL
+    api_url: str | None = None
     step_up_timeout_minutes: int = 15
     step_up_poll_interval_seconds: int = 5
+    # Declare the purpose of this session (HIPAA minimum-necessary).
+    # When a compliance pack defines session_scopes, tools outside the declared
+    # intent are step-up-challenged even if they appear in the approved scope.
+    session_intent: str | None = None
 
     @property
     def resolved_api_url(self) -> str:
         """Ingest/events API base URL: THOTH_API_URL env var > api_url field."""
         if override := os.getenv("THOTH_API_URL"):
             return override.rstrip("/")
-        return self.api_url
+        if self.api_url:
+            return self.api_url.rstrip("/")
+        raise ValueError("Thoth API URL is required (set api_url or THOTH_API_URL)")
 
     @property
     def resolved_enforcer_url(self) -> str:
-        """Enforcer base URL: THOTH_ENFORCER_URL env var > hosted API (when api_key set) > internal dev default."""
-        if override := os.getenv("THOTH_ENFORCER_URL"):
-            return override.rstrip("/")
-        if self.api_key:
-            return self.api_url
-        return "http://enforcer:8080"
+        """Enforcer base URL (single-URL contract): same as resolved_api_url."""
+        return self.resolved_api_url
 
 
 class EnforcementDecision(BaseModel):

@@ -21,8 +21,9 @@ _HTTP_TIMEOUT = httpx.Timeout(connect=2.0, read=6.0, write=2.0, pool=2.0)
 class StepUpClient:
     def __init__(self, config: ThothConfig) -> None:
         self._config = config
-        self._http = httpx.Client(base_url=config.resolved_enforcer_url, timeout=_HTTP_TIMEOUT)
-        self._async_http = httpx.AsyncClient(base_url=config.resolved_enforcer_url, timeout=_HTTP_TIMEOUT)
+        headers = {"Authorization": f"Bearer {config.api_key}"} if config.api_key else {}
+        self._http = httpx.Client(base_url=config.resolved_enforcer_url, timeout=_HTTP_TIMEOUT, headers=headers)
+        self._async_http = httpx.AsyncClient(base_url=config.resolved_enforcer_url, timeout=_HTTP_TIMEOUT, headers=headers)
 
     def wait(self, hold_token: str) -> EnforcementDecision:
         """Synchronous poll until approved/blocked or timeout. Returns BLOCK on timeout."""

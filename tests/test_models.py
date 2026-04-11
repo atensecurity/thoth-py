@@ -37,7 +37,31 @@ def test_thoth_config_defaults():
         tenant_id="trantor",
     )
     assert config.enforcement == EnforcementMode.PROGRESSIVE
-    assert config.resolved_enforcer_url == "http://enforcer:8080"
+    with pytest.raises(ValueError, match="Thoth API URL is required"):
+        _ = config.resolved_enforcer_url
+
+
+def test_thoth_config_resolved_enforcer_url_matches_api_url():
+    config = ThothConfig(
+        agent_id="my-agent",
+        approved_scope=["read:data"],
+        tenant_id="trantor",
+        api_key="thoth_live_key",
+        api_url="https://enforce.trantor.aten.security",
+    )
+    assert config.resolved_api_url == "https://enforce.trantor.aten.security"
+    assert config.resolved_enforcer_url == config.resolved_api_url
+
+
+def test_thoth_config_env_api_url_overrides_field(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("THOTH_API_URL", "https://enforce.env.aten.security")
+    config = ThothConfig(
+        agent_id="my-agent",
+        approved_scope=["read:data"],
+        tenant_id="trantor",
+        api_url="https://enforce.field.aten.security",
+    )
+    assert config.resolved_enforcer_url == "https://enforce.env.aten.security"
 
 
 def test_enforcement_decision_allow():
