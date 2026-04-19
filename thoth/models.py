@@ -53,10 +53,17 @@ class BehavioralEvent(BaseModel):
     enforcement_mode: EnforcementMode = EnforcementMode.PROGRESSIVE
     session_tool_calls: list[str] = Field(default_factory=list)
     tool_name: str = ""
+    endpoint_id: str | None = None
+    hostname: str | None = None
     occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     ingested_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     ttl: int = Field(default=0)
     violation_id: str | None = None
+    # WORM tamper-evident chain fields
+    chain_index: int = 0
+    hash: str = ""
+    previous_hash: str = ""
+    signature: str = ""
 
     @model_validator(mode="after")
     def set_ttl(self) -> BehavioralEvent:

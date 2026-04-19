@@ -9,7 +9,7 @@ Prerequisites:
     pip install "aten-thoth" langgraph langchain-anthropic
 
 Environment variables:
-    THOTH_API_KEY      — your Thoth API key (get one at https://app.aten.security)
+    THOTH_API_KEY      — your Thoth API key (get one at https://app.atensecurity.com)
     ANTHROPIC_API_KEY  — your Anthropic API key
     THOTH_TENANT_ID    — your Thoth tenant ID
 """
@@ -97,4 +97,4 @@ try:
 except ThothPolicyViolation as e:
     print(f"⚠ Policy violation on '{e.tool_name}': {e.reason}")
     if e.violation_id:
-        print(f"  Violation ID: {e.violation_id} — view at https://app.aten.security")
+        print(f"  Violation ID: {e.violation_id} — view at https://app.atensecurity.com")

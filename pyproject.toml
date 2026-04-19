@@ -16,12 +16,12 @@ test = "poetry run pytest -rav ."
 update = "poetry update --no-interaction"
 
 [tool.poetry]
-authors = ["Aten Engineering <engineering@aten.security>"]
+authors = ["Aten Engineering <engineering@atensecurity.com>"]
 description = "AI agent governance SDK by Aten Security"
 name = "aten-thoth"
 packages = [{include = "thoth"}]
 readme = "README.md"
-version = "0.1.2"
+version = "0.1.5"
 
 [tool.poetry.dependencies]
 anyio = ">=4.0"
@@ -42,7 +42,7 @@ codespell = "2.4.2"
 [tool.poetry.group.dev.dependencies]
 moto = {extras = ["sqs"], version = "==5.1.22"}
 poethepoet = "0.34.0"
-pytest = "==9.0.2"
+pytest = "==9.0.3"
 pytest-asyncio = "==1.3.0"
 respx = "==0.22.0"
 ruff = "==0.15.6"
@@ -54,8 +54,8 @@ openai = {version = ">=1.50", optional = true}
 pyautogen = {version = ">=0.2", optional = true}
 
 [tool.poetry.urls]
-Documentation = "https://docs.aten.security"
-Homepage = "https://aten.security/thoth"
+Documentation = "https://docs.atensecurity.com"
+Homepage = "https://atensecurity.com/thoth"
 Repository = "https://github.com/atensecurity/thoth-py"
 
 [tool.poetry-dynamic-versioning]

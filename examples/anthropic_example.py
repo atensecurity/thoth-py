@@ -5,7 +5,7 @@ Prerequisites:
     pip install "aten-thoth" anthropic
 
 Environment variables:
-    THOTH_API_KEY      — your Thoth API key (get one at https://app.aten.security)
+    THOTH_API_KEY      — your Thoth API key (get one at https://app.atensecurity.com)
     ANTHROPIC_API_KEY  — your Anthropic API key
     THOTH_TENANT_ID    — your Thoth tenant ID
 """

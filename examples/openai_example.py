@@ -5,7 +5,7 @@ Prerequisites:
     pip install "aten-thoth" openai
 
 Environment variables:
-    THOTH_API_KEY      — your Thoth API key (get one at https://app.aten.security)
+    THOTH_API_KEY      — your Thoth API key (get one at https://app.atensecurity.com)
     OPENAI_API_KEY     — your OpenAI API key
     THOTH_TENANT_ID    — your Thoth tenant ID
 """
