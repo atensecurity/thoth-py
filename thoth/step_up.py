@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from typing import Any
 
 import httpx
 
@@ -16,6 +17,35 @@ _TIMEOUT_DECISION = EnforcementDecision(
     reason="step-up auth timeout — no approver response",
 )
 _HTTP_TIMEOUT = httpx.Timeout(connect=2.0, read=6.0, write=2.0, pool=2.0)
+
+
+def _coerce_hold_payload(payload: Any) -> EnforcementDecision:
+    """
+    Convert hold-status payloads into EnforcementDecision.
+
+    Enforcer /v1/enforce/hold/{token} returns HoldToken shape:
+      { resolved: bool, resolution: "ALLOW" | "BLOCK" | null, ... }
+    Older clients may still receive direct decision-shaped payloads.
+    """
+    if isinstance(payload, dict):
+        decision = payload.get("decision")
+        if isinstance(decision, str):
+            try:
+                return EnforcementDecision(decision=DecisionType(decision), reason=payload.get("reason"))
+            except ValueError:
+                pass
+
+        resolved = bool(payload.get("resolved"))
+        resolution = payload.get("resolution")
+        if resolved and isinstance(resolution, str):
+            try:
+                return EnforcementDecision(decision=DecisionType(resolution), reason=payload.get("reason"))
+            except ValueError:
+                pass
+        if not resolved:
+            return EnforcementDecision(decision=DecisionType.STEP_UP)
+
+    return EnforcementDecision(decision=DecisionType.STEP_UP)
 
 
 class StepUpClient:
@@ -32,7 +62,7 @@ class StepUpClient:
             try:
                 resp = self._http.get(f"/v1/enforce/hold/{hold_token}")
                 resp.raise_for_status()
-                decision = EnforcementDecision.model_validate(resp.json())
+                decision = _coerce_hold_payload(resp.json())
                 if not decision.is_step_up:
                     return decision
             except Exception:
@@ -48,7 +78,7 @@ class StepUpClient:
             try:
                 resp = await self._async_http.get(f"/v1/enforce/hold/{hold_token}")
                 resp.raise_for_status()
-                decision = EnforcementDecision.model_validate(resp.json())
+                decision = _coerce_hold_payload(resp.json())
                 if not decision.is_step_up:
                     return decision
             except Exception:

@@ -23,6 +23,33 @@ from thoth.step_up import StepUpClient
 logger = logging.getLogger(__name__)
 
 
+def _to_jsonable(value: Any, *, depth: int = 0) -> Any:
+    if depth > 5:
+        return "[truncated]"
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, (list, tuple)):
+        return [_to_jsonable(v, depth=depth + 1) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _to_jsonable(v, depth=depth + 1) for k, v in value.items()}
+    return str(value)
+
+
+def _tool_args_from_call(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any] | None:
+    if len(args) == 1 and isinstance(args[0], dict) and not kwargs:
+        return _to_jsonable(args[0])
+    if not args and kwargs:
+        return _to_jsonable(kwargs)
+    if not args and not kwargs:
+        return None
+    payload: dict[str, Any] = {"args": _to_jsonable(list(args))}
+    if kwargs:
+        payload["kwargs"] = _to_jsonable(kwargs)
+    return payload
+
+
 class Tracer:
     def __init__(
         self,
@@ -44,8 +71,9 @@ class Tracer:
             @functools.wraps(fn)
             async def async_wrapped(*args: Any, **kwargs: Any) -> Any:
                 self._emit(tool_name, EventType.TOOL_CALL_PRE, str(args))
+                tool_args = _tool_args_from_call(args, kwargs)
                 try:
-                    await self._aenforce(tool_name)  # async path — does not block event loop
+                    await self._aenforce(tool_name, tool_args=tool_args)  # async path — does not block event loop
                 except ThothPolicyViolation as exc:
                     self._emit(tool_name, EventType.TOOL_CALL_BLOCK, exc.reason, violation_id=exc.violation_id)
                     raise
@@ -59,8 +87,9 @@ class Tracer:
         @functools.wraps(fn)
         def sync_wrapped(*args: Any, **kwargs: Any) -> Any:
             self._emit(tool_name, EventType.TOOL_CALL_PRE, str(args))
+            tool_args = _tool_args_from_call(args, kwargs)
             try:
-                self._enforce(tool_name)
+                self._enforce(tool_name, tool_args=tool_args)
             except ThothPolicyViolation as exc:
                 self._emit(tool_name, EventType.TOOL_CALL_BLOCK, exc.reason, violation_id=exc.violation_id)
                 raise
@@ -71,14 +100,18 @@ class Tracer:
 
         return sync_wrapped
 
-    def _enforce(self, tool_name: str) -> None:
+    def _enforce(self, tool_name: str, tool_args: dict[str, Any] | None = None) -> None:
         """Synchronous enforcement check. Raises ThothPolicyViolation on BLOCK."""
         if self._config.enforcement == EnforcementMode.OBSERVE:
             return
+        pending_tool_calls = list(self._session.tool_calls)
+        if not pending_tool_calls or pending_tool_calls[-1] != tool_name:
+            pending_tool_calls.append(tool_name)
         decision = self._enforcer.check(
             tool_name=tool_name,
             session_id=self._session.session_id,
-            tool_calls=list(self._session.tool_calls),
+            tool_calls=pending_tool_calls,
+            tool_args=tool_args,
         )
         if decision.is_step_up and decision.hold_token:
             decision = self._step_up.wait(decision.hold_token)
@@ -89,14 +122,18 @@ class Tracer:
                 violation_id=decision.violation_id,
             )
 
-    async def _aenforce(self, tool_name: str) -> None:
+    async def _aenforce(self, tool_name: str, tool_args: dict[str, Any] | None = None) -> None:
         """Async enforcement check. Uses non-blocking I/O. Raises ThothPolicyViolation on BLOCK."""
         if self._config.enforcement == EnforcementMode.OBSERVE:
             return
+        pending_tool_calls = list(self._session.tool_calls)
+        if not pending_tool_calls or pending_tool_calls[-1] != tool_name:
+            pending_tool_calls.append(tool_name)
         decision = await self._enforcer.acheck(
             tool_name=tool_name,
             session_id=self._session.session_id,
-            tool_calls=list(self._session.tool_calls),
+            tool_calls=pending_tool_calls,
+            tool_args=tool_args,
         )
         if decision.is_step_up and decision.hold_token:
             decision = await self._step_up.await_decision(decision.hold_token)

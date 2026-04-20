@@ -20,7 +20,9 @@ def config():
 
 @respx.mock
 def test_returns_allow_when_approved(config):
-    respx.get(f"{config.resolved_enforcer_url}/v1/enforce/hold/tok_123").mock(return_value=httpx.Response(200, json={"decision": "ALLOW"}))
+    respx.get(f"{config.resolved_enforcer_url}/v1/enforce/hold/tok_123").mock(
+        return_value=httpx.Response(200, json={"resolved": True, "resolution": "ALLOW"})
+    )
     client = StepUpClient(config)
     decision = client.wait("tok_123")
     assert decision.is_allow
@@ -28,7 +30,9 @@ def test_returns_allow_when_approved(config):
 
 @respx.mock
 def test_returns_block_when_rejected(config):
-    respx.get(f"{config.resolved_enforcer_url}/v1/enforce/hold/tok_456").mock(return_value=httpx.Response(200, json={"decision": "BLOCK", "reason": "rejected by approver"}))
+    respx.get(f"{config.resolved_enforcer_url}/v1/enforce/hold/tok_456").mock(
+        return_value=httpx.Response(200, json={"resolved": True, "resolution": "BLOCK", "reason": "rejected by approver"})
+    )
     client = StepUpClient(config)
     decision = client.wait("tok_456")
     assert decision.is_block
@@ -45,7 +49,9 @@ def test_returns_block_on_timeout():
         step_up_timeout_minutes=0,
         step_up_poll_interval_seconds=1,
     )
-    respx.get(f"{timeout_config.resolved_enforcer_url}/v1/enforce/hold/tok_789").mock(return_value=httpx.Response(200, json={"decision": "STEP_UP"}))
+    respx.get(f"{timeout_config.resolved_enforcer_url}/v1/enforce/hold/tok_789").mock(
+        return_value=httpx.Response(200, json={"resolved": False, "resolution": None})
+    )
     client = StepUpClient(timeout_config)
     decision = client.wait("tok_789")
     assert decision.is_block  # timeout -> block

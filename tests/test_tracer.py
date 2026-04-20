@@ -54,6 +54,15 @@ def test_records_tool_call_in_session(tracer):
     assert "read:data" in tracer._session.tool_calls
 
 
+def test_enforce_includes_current_tool_in_session_history(tracer):
+    tool = MagicMock(return_value="ok")
+    wrapped = tracer.wrap_tool("read:data", tool)
+    wrapped()
+    tracer._enforcer.check.assert_called_once()
+    _, kwargs = tracer._enforcer.check.call_args
+    assert kwargs["tool_calls"] == ["read:data"]
+
+
 def test_raises_policy_violation_on_block(config):
     session = SessionContext(config)
     emitter = MagicMock(spec=SqsEmitter)
@@ -133,6 +142,8 @@ async def test_wrap_async_tool_executes(base_config):
     result = await wrapped(5)
     assert result == 10  # would be coroutine object if not properly awaited
     enforcer.acheck.assert_awaited_once()
+    _, kwargs = enforcer.acheck.call_args
+    assert kwargs["tool_calls"] == ["async_tool"]
     enforcer.check.assert_not_called()  # sync path must not be invoked for async tools
 
 

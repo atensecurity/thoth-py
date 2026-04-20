@@ -88,6 +88,11 @@ class ThothConfig(BaseModel):
     # When a compliance pack defines session_scopes, tools outside the declared
     # intent are step-up-challenged even if they appear in the approved scope.
     session_intent: str | None = None
+    # Env-scoped policy lookup at enforcer side ("dev", "staging", "prod", ...).
+    environment: str = "prod"
+    # Optional correlation identifier propagated across enforcer/fastml/deepllm.
+    # Defaults to session_id when omitted.
+    enforcement_trace_id: str | None = None
 
     @property
     def resolved_api_url(self) -> str:
