@@ -12,8 +12,9 @@ stepping up for human approval, or silently observing based on your configured e
 
 1. [Installation](#installation)
 2. [Quick Start](#quick-start)
-3. [How It Works](#how-it-works)
-4. [Integration Examples](#integration-examples)
+3. [Legacy Compatibility (`ThothClient`)](#legacy-compatibility-thothclient)
+4. [How It Works](#how-it-works)
+5. [Integration Examples](#integration-examples)
    - [LangChain AgentExecutor](#langchain-agentexecutor)
    - [LangGraph](#langgraph)
    - [OpenAI Function Calling](#openai-function-calling)
@@ -21,13 +22,13 @@ stepping up for human approval, or silently observing based on your configured e
    - [CrewAI](#crewai)
    - [AutoGen](#autogen)
    - [Custom Tools (Generic)](#custom-tools-generic)
-5. [Enforcement Modes](#enforcement-modes)
-6. [Policy Decisions](#policy-decisions)
-7. [Handling Violations](#handling-violations)
-8. [Step-Up Authentication](#step-up-authentication)
-9. [Session Inspection](#session-inspection)
-10. [Configuration Reference](#configuration-reference)
-11. [Dashboard](#dashboard)
+6. [Enforcement Modes](#enforcement-modes)
+7. [Policy Decisions](#policy-decisions)
+8. [Handling Violations](#handling-violations)
+9. [Step-Up Authentication](#step-up-authentication)
+10. [Session Inspection](#session-inspection)
+11. [Configuration Reference](#configuration-reference)
+12. [Dashboard](#dashboard)
 
 ---
 
@@ -95,6 +96,30 @@ result = agent.run("Summarize the attached document and send it to the team.")
 
 That's it. No AWS credentials, no infrastructure setup — the SDK sends events and enforcement
 requests over HTTPS to your tenant API URL.
+
+---
+
+## Legacy Compatibility (`ThothClient`)
+
+`thoth.instrument()`, `thoth.instrument_anthropic()`, and `thoth.instrument_openai()` are the
+preferred APIs for new integrations.
+
+`ThothClient` is still exported for backward compatibility with older examples and wrappers:
+
+```python
+from thoth import ThothClient
+
+client = ThothClient(
+    agent_id="document-summarizer",
+    approved_scope=["read_file", "summarize"],
+    tenant_id="acme-corp",
+    api_url="https://enforce.acme.example",
+)
+
+agent = client.wrap(agent)  # legacy alias for client.instrument(agent)
+```
+
+For new code, prefer the module-level APIs shown in Quick Start.
 
 ---
 
