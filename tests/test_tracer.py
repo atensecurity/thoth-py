@@ -100,6 +100,43 @@ def test_waits_for_step_up_then_allows(config):
     step_up.wait.assert_called_once_with("tok_abc")
 
 
+def test_modify_rewrites_tool_args(config):
+    session = SessionContext(config)
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    step_up = MagicMock(spec=StepUpClient)
+    enforcer.check.return_value = EnforcementDecision(
+        decision=DecisionType.MODIFY,
+        modified_tool_args={"input": "sanitized"},
+    )
+
+    t = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
+    tool = MagicMock(return_value="ok")
+    wrapped = t.wrap_tool("write:slack", tool)
+    result = wrapped("original")
+    assert result == "ok"
+    tool.assert_called_once_with("sanitized")
+
+
+def test_defer_raises_policy_violation(config):
+    session = SessionContext(config)
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    step_up = MagicMock(spec=StepUpClient)
+    enforcer.check.return_value = EnforcementDecision(
+        decision=DecisionType.DEFER,
+        defer_reason="awaiting human context",
+        defer_timeout_seconds=30,
+    )
+
+    t = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
+    tool = MagicMock(return_value="should not run")
+    wrapped = t.wrap_tool("write:slack", tool)
+    with pytest.raises(ThothPolicyViolation, match="awaiting human context"):
+        wrapped("x")
+    tool.assert_not_called()
+
+
 def test_observe_mode_allows_out_of_scope(config):
     config.enforcement = EnforcementMode.OBSERVE
     session = SessionContext(config)

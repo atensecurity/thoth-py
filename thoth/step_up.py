@@ -28,22 +28,21 @@ def _coerce_hold_payload(payload: Any) -> EnforcementDecision:
     Older clients may still receive direct decision-shaped payloads.
     """
     if isinstance(payload, dict):
-        decision = payload.get("decision")
-        if isinstance(decision, str):
-            try:
-                return EnforcementDecision(decision=DecisionType(decision), reason=payload.get("reason"))
-            except ValueError:
-                pass
+        # Backward-compatible direct decision payload (ALLOW/BLOCK/STEP_UP/etc.).
+        if payload.get("decision") or payload.get("authorization_decision"):
+            return EnforcementDecision.model_validate(payload)
 
-        resolved = bool(payload.get("resolved"))
-        resolution = payload.get("resolution")
-        if resolved and isinstance(resolution, str):
-            try:
-                return EnforcementDecision(decision=DecisionType(resolution), reason=payload.get("reason"))
-            except ValueError:
-                pass
-        if not resolved:
-            return EnforcementDecision(decision=DecisionType.STEP_UP)
+        # Canonical hold-token payload:
+        # {resolved: bool, resolution: "ALLOW"|"BLOCK"|...}
+        if bool(payload.get("resolved")):
+            resolution = payload.get("resolution")
+            if isinstance(resolution, str) and resolution.strip():
+                resolved_payload = dict(payload)
+                resolved_payload["decision"] = resolution
+                return EnforcementDecision.model_validate(resolved_payload)
+            return EnforcementDecision(decision=DecisionType.BLOCK, reason=payload.get("reason") or "step-up resolved without a valid decision")
+
+        return EnforcementDecision(decision=DecisionType.STEP_UP)
 
     return EnforcementDecision(decision=DecisionType.STEP_UP)
 

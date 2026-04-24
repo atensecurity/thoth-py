@@ -120,8 +120,8 @@ Agent calls tool
 ```
 
 Events are batched and flushed to the Aten ingest API in a background daemon thread with
-at-most-10 per batch. If the enforcer is unreachable, Thoth fails open (ALLOW) and logs a
-warning — it never blocks production traffic due to an infrastructure fault.
+at-most-10 per batch. If the enforcer is unreachable, Thoth fails closed (BLOCK) and logs a
+warning. Tool execution is prevented until policy checks are reachable again.
 
 ---
 
@@ -431,8 +431,8 @@ The enforcer returns one of three decisions for each tool call:
 | `STEP_UP` | Call requires human approval. | SDK polls `/v1/enforce/hold/{token}` until approved or timed out. On timeout → `BLOCK`. |
 | `BLOCK` | Call violates policy. | `ThothPolicyViolation` is raised before the tool executes. |
 
-Enforcer errors (network timeout, 5xx) always result in `ALLOW` so that infrastructure faults
-never interrupt production workloads. All errors are logged at `WARNING` level.
+Enforcer errors (for example, network timeout or 5xx) fail closed: the SDK treats them as
+`BLOCK` and raises `ThothPolicyViolation`. Errors are logged at `WARNING` level.
 
 ---
 

@@ -69,6 +69,8 @@ def test_enforcement_decision_allow():
     assert decision.is_allow
     assert not decision.is_block
     assert not decision.is_step_up
+    assert not decision.is_modify
+    assert not decision.is_defer
 
 
 def test_enforcement_decision_block():
@@ -79,3 +81,30 @@ def test_enforcement_decision_block():
     )
     assert decision.is_block
     assert decision.reason == "Tool not in approved scope"
+
+
+def test_enforcement_decision_normalizes_alias_and_payload():
+    decision = EnforcementDecision(
+        authorization_decision="modify",
+        modification_reason="path normalized",
+        modified_tool_args={"path": "/tmp/safe.txt"},
+    )
+    assert decision.decision == DecisionType.MODIFY
+    assert decision.is_modify
+    assert decision.reason == "path normalized"
+    assert decision.modified_tool_args == {"path": "/tmp/safe.txt"}
+
+
+def test_enforcement_decision_parses_reason_code_and_action_classification_aliases():
+    decision = EnforcementDecision.model_validate(
+        {
+            "authorization_decision": "BLOCK",
+            "decisionReasonCode": "policy_scope_violation",
+            "actionClassification": "write",
+            "reason": "tool not in approved scope",
+            "violation_id": "vio_123",
+        }
+    )
+    assert decision.is_block
+    assert decision.decision_reason_code == "policy_scope_violation"
+    assert decision.action_classification == "write"

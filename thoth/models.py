@@ -34,6 +34,25 @@ class DecisionType(StrEnum):
     ALLOW = "ALLOW"
     BLOCK = "BLOCK"
     STEP_UP = "STEP_UP"
+    MODIFY = "MODIFY"
+    DEFER = "DEFER"
+
+
+_DECISION_ALIASES: dict[str, DecisionType] = {
+    "ALLOW": DecisionType.ALLOW,
+    "BLOCK": DecisionType.BLOCK,
+    "DENY": DecisionType.BLOCK,
+    "STEP_UP": DecisionType.STEP_UP,
+    "CHALLENGE": DecisionType.STEP_UP,
+    "ESCALATE": DecisionType.STEP_UP,
+    "REVIEW": DecisionType.STEP_UP,
+    "MODIFY": DecisionType.MODIFY,
+    "MODIFIED": DecisionType.MODIFY,
+    "TRANSFORM": DecisionType.MODIFY,
+    "DEFER": DecisionType.DEFER,
+    "DEFERRED": DecisionType.DEFER,
+    "HOLD": DecisionType.DEFER,
+}
 
 
 _TTL_90_DAYS = 90 * 24 * 60 * 60
@@ -111,9 +130,39 @@ class ThothConfig(BaseModel):
 
 class EnforcementDecision(BaseModel):
     decision: DecisionType
+    authorization_decision: str | None = None
+    decision_reason_code: str | None = None
+    action_classification: str | None = None
     reason: str | None = None
     violation_id: str | None = None
     hold_token: str | None = None
+    modified_tool_args: dict[str, Any] | None = None
+    modification_reason: str | None = None
+    defer_reason: str | None = None
+    defer_timeout_seconds: int | None = None
+    step_up_timeout_seconds: int | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_decision(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        if not payload.get("decision_reason_code"):
+            payload["decision_reason_code"] = payload.get("decisionReasonCode")
+        if not payload.get("action_classification"):
+            payload["action_classification"] = payload.get("actionClassification")
+        raw = payload.get("decision")
+        if not raw:
+            raw = payload.get("authorization_decision")
+        key = str(raw or "").strip().upper()
+        payload["decision"] = _DECISION_ALIASES.get(key, DecisionType.BLOCK)
+        if not payload.get("reason"):
+            if payload["decision"] == DecisionType.MODIFY:
+                payload["reason"] = payload.get("modification_reason")
+            elif payload["decision"] == DecisionType.DEFER:
+                payload["reason"] = payload.get("defer_reason")
+        return payload
 
     @property
     def is_allow(self) -> bool:
@@ -126,3 +175,11 @@ class EnforcementDecision(BaseModel):
     @property
     def is_step_up(self) -> bool:
         return self.decision == DecisionType.STEP_UP
+
+    @property
+    def is_modify(self) -> bool:
+        return self.decision == DecisionType.MODIFY
+
+    @property
+    def is_defer(self) -> bool:
+        return self.decision == DecisionType.DEFER
