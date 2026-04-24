@@ -17,6 +17,7 @@ stepping up for human approval, or silently observing based on your configured e
 5. [Integration Examples](#integration-examples)
    - [LangChain AgentExecutor](#langchain-agentexecutor)
    - [LangGraph](#langgraph)
+   - [Claude Agent SDK (`query`)](#claude-agent-sdk-query)
    - [OpenAI Function Calling](#openai-function-calling)
    - [Anthropic Claude](#anthropic-claude)
    - [CrewAI](#crewai)
@@ -48,6 +49,12 @@ pip install "aten-thoth[langchain]"
 
 ```bash
 pip install "aten-thoth[openai]"
+```
+
+**With Claude Agent SDK support:**
+
+```bash
+pip install "aten-thoth[claude]"
 ```
 
 **With AutoGen support:**
@@ -246,6 +253,53 @@ result = agent.invoke({"messages": [("user", "Search for Q4 data and post it to 
 ```
 
 See `examples/langgraph_example.py` for the full working script.
+
+### Claude Agent SDK (`query`)
+
+For `claude-agent-sdk`, instrument `ClaudeAgentOptions` instead of a `.tools` list.
+Thoth hooks into `can_use_tool` and tool lifecycle hooks.
+
+```python
+import anyio
+import os
+from claude_agent_sdk import ClaudeAgentOptions, query
+import thoth
+
+
+async def prompt_stream():
+    # can_use_tool callbacks require streaming mode in claude-agent-sdk
+    yield {
+        "type": "user",
+        "message": {"role": "user", "content": "Read README.md and summarize risks."},
+        "parent_tool_use_id": None,
+        "session_id": "thoth-demo-session",
+    }
+
+
+async def main():
+    options = ClaudeAgentOptions(
+        max_turns=1,
+        allowed_tools=["Read"],       # auto-allow list in Claude SDK
+        disallowed_tools=["Bash"],    # explicit deny list in Claude SDK
+    )
+
+    options = thoth.instrument_claude_agent_sdk(
+        options,
+        agent_id="claude-agent-sdk-demo",
+        approved_scope=["Read"],      # Thoth policy scope
+        tenant_id=os.environ["THOTH_TENANT_ID"],
+        user_id="alice@acme.com",
+        enforcement="block",
+    )
+
+    async for message in query(prompt=prompt_stream(), options=options):
+        print(message)
+
+
+anyio.run(main)
+```
+
+See `examples/claude_agent_sdk_example.py` for the full working script.
 
 ### Anthropic Claude
 

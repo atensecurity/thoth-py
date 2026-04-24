@@ -21,7 +21,7 @@ description = "AI agent governance SDK by Aten Security"
 name = "aten-thoth"
 packages = [{include = "thoth"}]
 readme = "README.md"
-version = "0.1.10"
+version = "0.1.11"
 
 [tool.poetry.dependencies]
 anyio = ">=4.0"
@@ -33,6 +33,7 @@ python = ">=3.12,<3.15"
 [tool.poetry.extras]
 anthropic = ["anthropic"]
 autogen = ["pyautogen"]
+claude = ["claude-agent-sdk"]
 langchain = ["langchain-core"]
 openai = ["openai"]
 
@@ -49,6 +50,7 @@ ruff = "==0.15.6"
 
 [tool.poetry.group.extras.dependencies]
 anthropic = {version = ">=0.40", optional = true}
+claude-agent-sdk = {version = ">=0.1.66", optional = true}
 langchain-core = {version = ">=0.2", optional = true}
 openai = {version = ">=1.50", optional = true}
 pyautogen = {version = ">=0.2", optional = true}

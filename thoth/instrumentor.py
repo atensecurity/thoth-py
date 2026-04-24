@@ -208,6 +208,54 @@ def instrument_openai(
     return cast(dict[str, Any], wrap_openai_tools(tool_fns, tracer))
 
 
+def instrument_claude_agent_sdk(
+    options: Any | None = None,
+    *,
+    agent_id: str,
+    approved_scope: list[str],
+    tenant_id: str,
+    user_id: str = "system",
+    enforcement: str = "progressive",
+    api_key: str | None = None,
+    api_url: str | None = None,
+    session_id: str | None = None,
+    session_intent: str | None = None,
+    environment: str = "prod",
+    enforcement_trace_id: str | None = None,
+    emit_tool_lifecycle_hooks: bool = True,
+) -> Any:
+    """Instrument ``claude-agent-sdk`` options with Thoth governance.
+
+    This wires Thoth into ``ClaudeAgentOptions.can_use_tool`` and can also
+    attach lifecycle hooks for post-success/post-failure telemetry.
+
+    Notes:
+        ``claude-agent-sdk`` requires streaming mode for ``can_use_tool``
+        callbacks. When calling ``claude_agent_sdk.query(...)``, pass prompt as
+        an async iterable (not a plain string) when using this integration.
+    """
+    from thoth.integrations.claude_agent_sdk import instrument_claude_agent_sdk_options
+
+    _, _, _, _, _, tracer = _build_components(
+        agent_id,
+        approved_scope,
+        tenant_id,
+        user_id,
+        enforcement,
+        api_key,
+        api_url,
+        session_id,
+        session_intent,
+        environment,
+        enforcement_trace_id,
+    )
+    return instrument_claude_agent_sdk_options(
+        options,
+        tracer,
+        emit_tool_lifecycle_hooks=emit_tool_lifecycle_hooks,
+    )
+
+
 def _wrap_agent_tools(agent: Any, tracer: Tracer) -> None:
     """Wrap tools on common agent shapes. Extend for each framework."""
     # LangChain AgentExecutor

@@ -65,3 +65,27 @@ def test_instrument_raises_on_block():
         )
         with pytest.raises(ThothPolicyViolation):
             agent.tools[0].run("test")
+
+
+def test_instrument_claude_agent_sdk_delegates():
+    options = object()
+    wrapped_options = object()
+    with (
+        patch("thoth.instrumentor.EnforcerClient") as MockEnforcer,
+        patch("thoth.instrumentor.HttpEmitter"),
+        patch(
+            "thoth.integrations.claude_agent_sdk.instrument_claude_agent_sdk_options",
+            return_value=wrapped_options,
+        ) as mock_integration,
+    ):
+        MockEnforcer.return_value.check.return_value = EnforcementDecision(decision=DecisionType.ALLOW)
+        result = thoth.instrument_claude_agent_sdk(
+            options,
+            agent_id="my-agent",
+            approved_scope=["Read"],
+            tenant_id="trantor",
+            api_url="https://enforcer.example",
+        )
+
+    assert result is wrapped_options
+    mock_integration.assert_called_once()

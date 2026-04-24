@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
-from thoth.instrumentor import instrument, instrument_anthropic, instrument_openai
+from thoth.instrumentor import (
+    instrument,
+    instrument_anthropic,
+    instrument_claude_agent_sdk,
+    instrument_openai,
+)
 
 
 class ThothClient:
@@ -18,10 +23,13 @@ class ThothClient:
         return instrument(agent, **self._merged(kwargs))
 
     def instrument_anthropic(self, tool_fns: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
-        return instrument_anthropic(tool_fns, **self._merged(kwargs))
+        return cast(dict[str, Any], instrument_anthropic(tool_fns, **self._merged(kwargs)))
 
     def instrument_openai(self, tool_fns: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
-        return instrument_openai(tool_fns, **self._merged(kwargs))
+        return cast(dict[str, Any], instrument_openai(tool_fns, **self._merged(kwargs)))
+
+    def instrument_claude_agent_sdk(self, options: Any | None = None, **kwargs: Any) -> Any:
+        return instrument_claude_agent_sdk(options, **self._merged(kwargs))
 
     # Legacy aliases kept for backwards compatibility.
     def wrap(self, agent: Any, **kwargs: Any) -> Any:
@@ -32,6 +40,9 @@ class ThothClient:
 
     def wrap_openai_tools(self, tool_fns: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
         return self.instrument_openai(tool_fns, **kwargs)
+
+    def wrap_claude_agent_sdk(self, options: Any | None = None, **kwargs: Any) -> Any:
+        return self.instrument_claude_agent_sdk(options, **kwargs)
 
     def _merged(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         merged = dict(self._defaults)
