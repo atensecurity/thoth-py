@@ -66,6 +66,13 @@ def instrument_claude_agent_sdk_options(
             "options must be an instance of claude_agent_sdk.types.ClaudeAgentOptions"
         )
 
+    model_name = str(getattr(options, "model", "") or "").strip() or "unspecified"
+    tracer._emit(
+        "claude_agent_sdk",
+        EventType.LLM_INVOCATION,
+        f"claude_agent_sdk_session_start model={model_name}",
+    )
+
     existing_can_use_tool = options.can_use_tool
 
     async def governed_can_use_tool(

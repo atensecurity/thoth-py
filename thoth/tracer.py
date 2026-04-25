@@ -12,6 +12,7 @@ from thoth.enforcer_client import EnforcerClient
 from thoth.exceptions import ThothPolicyViolation
 from thoth.models import (
     BehavioralEvent,
+    EnforcementDecision,
     EnforcementMode,
     EventType,
     SourceType,
@@ -172,8 +173,10 @@ class Tracer:
             tool_calls=pending_tool_calls,
             tool_args=tool_args,
         )
+        self._log_decision(tool_name, decision, async_path=False)
         if decision.is_step_up and decision.hold_token:
             decision = self._step_up.wait(decision.hold_token)
+            self._log_decision(tool_name, decision, async_path=False, phase="step_up_resolved")
         if decision.is_defer:
             reason = decision.defer_reason or decision.reason or "deferred pending additional context"
             if decision.defer_timeout_seconds and decision.defer_timeout_seconds > 0:
@@ -218,8 +221,10 @@ class Tracer:
             tool_calls=pending_tool_calls,
             tool_args=tool_args,
         )
+        self._log_decision(tool_name, decision, async_path=True)
         if decision.is_step_up and decision.hold_token:
             decision = await self._step_up.await_decision(decision.hold_token)
+            self._log_decision(tool_name, decision, async_path=True, phase="step_up_resolved")
         if decision.is_defer:
             reason = decision.defer_reason or decision.reason or "deferred pending additional context"
             if decision.defer_timeout_seconds and decision.defer_timeout_seconds > 0:
@@ -256,3 +261,28 @@ class Tracer:
             violation_id=violation_id,
         )
         self._emitter.emit(event)
+
+    def _log_decision(
+        self,
+        tool_name: str,
+        decision: EnforcementDecision,
+        *,
+        async_path: bool,
+        phase: str = "enforce",
+    ) -> None:
+        trace_id = self._config.enforcement_trace_id or self._session.session_id
+        logger.debug(
+            (
+                "thoth %s decision (%s path) tool=%s decision=%s "
+                "authorization_decision=%s reason_code=%s reason=%s trace_id=%s session_id=%s"
+            ),
+            phase,
+            "async" if async_path else "sync",
+            tool_name,
+            decision.decision.value,
+            decision.authorization_decision,
+            decision.decision_reason_code,
+            decision.reason,
+            trace_id,
+            self._session.session_id,
+        )

@@ -89,3 +89,20 @@ def test_instrument_claude_agent_sdk_delegates():
 
     assert result is wrapped_options
     mock_integration.assert_called_once()
+
+
+def test_instrument_uses_thoth_environment_env_var(monkeypatch: pytest.MonkeyPatch):
+    agent = FakeAgent(tools=[FakeTool()])
+    monkeypatch.setenv("THOTH_ENVIRONMENT", "dev")
+    with patch("thoth.instrumentor.EnforcerClient"), patch("thoth.instrumentor.HttpEmitter"), patch("thoth.instrumentor.Tracer") as mock_tracer:
+        thoth.instrument(
+            agent,
+            agent_id="my-agent",
+            approved_scope=["read:data"],
+            tenant_id="trantor",
+            api_url="https://enforcer.example",
+        )
+
+    assert mock_tracer.call_count == 1
+    config = mock_tracer.call_args.kwargs["config"]
+    assert config.environment == "dev"

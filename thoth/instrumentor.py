@@ -23,7 +23,7 @@ def _build_components(
     api_url: str | None,
     session_id: str | None,
     session_intent: str | None = None,
-    environment: str = "prod",
+    environment: str | None = None,
     enforcement_trace_id: str | None = None,
 ) -> tuple[ThothConfig, SessionContext, HttpEmitter, EnforcerClient, StepUpClient, Tracer]:
     """Construct the full Thoth component stack from caller parameters."""
@@ -31,6 +31,7 @@ def _build_components(
     resolved_api_url = (api_url or os.getenv("THOTH_API_URL") or "").strip()
     if not resolved_api_url:
         raise ValueError("Thoth API URL is required (pass api_url or set THOTH_API_URL)")
+    resolved_environment = (environment or os.getenv("THOTH_ENVIRONMENT") or "prod").strip().lower() or "prod"
     config = ThothConfig(
         agent_id=agent_id,
         approved_scope=approved_scope,
@@ -40,7 +41,7 @@ def _build_components(
         api_key=resolved_api_key,
         api_url=resolved_api_url,
         session_intent=session_intent,
-        environment=environment,
+        environment=resolved_environment,
         enforcement_trace_id=enforcement_trace_id,
     )
     session = SessionContext(config, session_id=session_id)
@@ -64,7 +65,7 @@ def instrument(
     api_url: str | None = None,
     session_id: str | None = None,
     session_intent: str | None = None,
-    environment: str = "prod",
+    environment: str | None = None,
     enforcement_trace_id: str | None = None,
 ) -> Any:
     """
@@ -106,7 +107,7 @@ def instrument_anthropic(
     api_url: str | None = None,
     session_id: str | None = None,
     session_intent: str | None = None,
-    environment: str = "prod",
+    environment: str | None = None,
     enforcement_trace_id: str | None = None,
 ) -> dict[str, Any]:
     """Instrument tool functions for use in an Anthropic Claude agentic loop.
@@ -163,7 +164,7 @@ def instrument_openai(
     api_url: str | None = None,
     session_id: str | None = None,
     session_intent: str | None = None,
-    environment: str = "prod",
+    environment: str | None = None,
     enforcement_trace_id: str | None = None,
 ) -> dict[str, Any]:
     """Instrument tool functions for use in an OpenAI tool-calling loop.
@@ -220,7 +221,7 @@ def instrument_claude_agent_sdk(
     api_url: str | None = None,
     session_id: str | None = None,
     session_intent: str | None = None,
-    environment: str = "prod",
+    environment: str | None = None,
     enforcement_trace_id: str | None = None,
     emit_tool_lifecycle_hooks: bool = True,
 ) -> Any:

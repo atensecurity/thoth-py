@@ -78,7 +78,9 @@ async def test_instruments_options_and_allows_tool() -> None:
     assert result.updated_input == {"path": "/tmp/a.txt"}
     assert tracer._session.tool_calls == ["Read"]
 
-    pre_event = tracer._emitter.emit.call_args_list[0].args[0]
+    events = [call.args[0] for call in tracer._emitter.emit.call_args_list]
+    assert any(event.event_type == EventType.LLM_INVOCATION for event in events)
+    pre_event = next(event for event in events if event.event_type == EventType.TOOL_CALL_PRE)
     assert pre_event.event_type == EventType.TOOL_CALL_PRE
     assert pre_event.tool_name == "Read"
 
