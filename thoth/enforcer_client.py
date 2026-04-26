@@ -65,8 +65,8 @@ class EnforcerClient:
             resp.raise_for_status()
             return EnforcementDecision.model_validate(resp.json())
         except Exception:
-            logger.warning(
-                "thoth: enforcer unreachable, falling back to BLOCK for %s",
+            logger.error(
+                "thoth: enforcer unreachable, fail-closed fallback to BLOCK for tool=%s",
                 tool_name,
                 exc_info=True,
             )
@@ -85,8 +85,8 @@ class EnforcerClient:
             resp.raise_for_status()
             return EnforcementDecision.model_validate(resp.json())
         except Exception:
-            logger.warning(
-                "thoth: enforcer unreachable (async), falling back to BLOCK for %s",
+            logger.error(
+                "thoth: enforcer unreachable (async), fail-closed fallback to BLOCK for tool=%s",
                 tool_name,
                 exc_info=True,
             )
