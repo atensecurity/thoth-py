@@ -10,6 +10,7 @@ from typing import Any, Callable, cast
 from thoth.emitter import SqsEmitter
 from thoth.enforcer_client import EnforcerClient
 from thoth.exceptions import ThothPolicyViolation
+from thoth.logging_config import configure_thoth_logging_from_env
 from thoth.models import (
     BehavioralEvent,
     EnforcementDecision,
@@ -97,6 +98,7 @@ class Tracer:
         enforcer: EnforcerClient,
         step_up: StepUpClient,
     ) -> None:
+        configure_thoth_logging_from_env()
         self._config = config
         self._session = session
         self._emitter = emitter
@@ -274,13 +276,15 @@ class Tracer:
         logger.debug(
             (
                 "thoth %s decision (%s path) tool=%s decision=%s "
-                "authorization_decision=%s reason_code=%s reason=%s trace_id=%s session_id=%s"
+                "authorization_decision=%s hold_token=%s reason_code=%s "
+                "reason=%s trace_id=%s session_id=%s"
             ),
             phase,
             "async" if async_path else "sync",
             tool_name,
             decision.decision.value,
             decision.authorization_decision,
+            decision.hold_token,
             decision.decision_reason_code,
             decision.reason,
             trace_id,

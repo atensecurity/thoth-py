@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from thoth.logging_config import configure_thoth_logging_from_env
 from thoth.models import DecisionType, EnforcementDecision, ThothConfig
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ _FALLBACK = EnforcementDecision(
 
 class EnforcerClient:
     def __init__(self, config: ThothConfig) -> None:
+        configure_thoth_logging_from_env()
         self._config = config
         headers = {"x-api-key": config.api_key} if config.api_key else {}
         # resolved_enforcer_url follows the single-URL contract and mirrors resolved_api_url.

@@ -10,6 +10,7 @@ from typing import Any
 import boto3
 import httpx
 
+from thoth.logging_config import configure_thoth_logging_from_env
 from thoth.models import BehavioralEvent
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ _DRAIN_TIMEOUT_S = 0.25
 
 class SqsEmitter:
     def __init__(self, queue_url: str | None, region: str = "us-west-2") -> None:
+        configure_thoth_logging_from_env()
         self._queue_url = queue_url
         self._client: Any | None = boto3.client("sqs", region_name=region) if queue_url else None
         self._queue: Queue[BehavioralEvent] = Queue(maxsize=_QUEUE_MAX)
@@ -101,6 +103,7 @@ class HttpEmitter:
     using an API key — no AWS credentials required."""
 
     def __init__(self, api_url: str, api_key: str) -> None:
+        configure_thoth_logging_from_env()
         self._endpoint = f"{api_url.rstrip('/')}/v1/events/batch"
         api_key_value = (api_key or "").strip()
         # Send both auth header styles. Some customer ingress stacks strip or

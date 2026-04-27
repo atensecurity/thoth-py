@@ -1,5 +1,6 @@
 # tests/test_tracer.py
 import asyncio
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -230,3 +231,21 @@ def test_wrap_tool_preserves_name(base_config):
 
     wrapped = tracer.wrap_tool("my_named_tool", my_named_tool)
     assert wrapped.__name__ == "my_named_tool"
+
+
+def test_log_decision_includes_hold_token(config, caplog):
+    session = SessionContext(config)
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    step_up = MagicMock(spec=StepUpClient)
+    tracer = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
+
+    decision = EnforcementDecision(
+        decision=DecisionType.STEP_UP,
+        hold_token="tok_step_up_123",
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="thoth.tracer"):
+        tracer._log_decision("write:slack", decision, async_path=False)
+
+    assert "hold_token=tok_step_up_123" in caplog.text

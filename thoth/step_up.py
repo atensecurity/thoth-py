@@ -8,6 +8,7 @@ from typing import Any
 
 import httpx
 
+from thoth.logging_config import configure_thoth_logging_from_env
 from thoth.models import DecisionType, EnforcementDecision, ThothConfig
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,7 @@ def _coerce_hold_payload(payload: Any) -> EnforcementDecision:
 
 class StepUpClient:
     def __init__(self, config: ThothConfig) -> None:
+        configure_thoth_logging_from_env()
         self._config = config
         headers = {"Authorization": f"Bearer {config.api_key}"} if config.api_key else {}
         self._http = httpx.Client(base_url=config.resolved_enforcer_url, timeout=_HTTP_TIMEOUT, headers=headers)

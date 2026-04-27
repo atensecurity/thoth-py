@@ -612,6 +612,7 @@ if session:
 |---|---|
 | `THOTH_API_KEY` | API key from the Aten dashboard. Enables HTTPS event transport. Example: `thoth_live_abc123...` |
 | `THOTH_API_URL` | Required tenant API base URL for both event ingestion and policy checks. Example: `https://enforce.<tenant>.<apex-domain>` |
+| `THOTH_LOG_LEVEL` | Optional SDK logger level override (`DEBUG`, `INFO`, `WARNING`, `ERROR`). If unset, SDK falls back to `LOG_LEVEL` when present. |
 
 Resolution precedence:
 - `THOTH_API_URL` overrides `api_url`.

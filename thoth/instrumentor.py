@@ -7,6 +7,7 @@ from typing import Any, cast
 from thoth._context import _CURRENT_SESSION
 from thoth.emitter import HttpEmitter
 from thoth.enforcer_client import EnforcerClient
+from thoth.logging_config import configure_thoth_logging_from_env
 from thoth.models import EnforcementMode, ThothConfig
 from thoth.session import SessionContext
 from thoth.step_up import StepUpClient
@@ -27,6 +28,7 @@ def _build_components(
     enforcement_trace_id: str | None = None,
 ) -> tuple[ThothConfig, SessionContext, HttpEmitter, EnforcerClient, StepUpClient, Tracer]:
     """Construct the full Thoth component stack from caller parameters."""
+    configure_thoth_logging_from_env()
     resolved_api_key = api_key or os.getenv("THOTH_API_KEY")
     resolved_api_url = (api_url or os.getenv("THOTH_API_URL") or "").strip()
     if not resolved_api_url:
