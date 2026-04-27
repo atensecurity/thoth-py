@@ -58,6 +58,14 @@ _DECISION_ALIASES: dict[str, DecisionType] = {
 _TTL_90_DAYS = 90 * 24 * 60 * 60
 
 
+def _tenant_scoped_event_id(tenant_id: str, event_id: str | None) -> str:
+    tenant = (tenant_id or "").strip() or "unknown"
+    raw_event_id = (event_id or "").strip() or str(uuid.uuid4())
+    if raw_event_id.startswith(f"{tenant}:"):
+        return raw_event_id
+    return f"{tenant}:{raw_event_id}"
+
+
 class BehavioralEvent(BaseModel):
     event_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     tenant_id: str
@@ -86,6 +94,7 @@ class BehavioralEvent(BaseModel):
 
     @model_validator(mode="after")
     def set_ttl(self) -> BehavioralEvent:
+        self.event_id = _tenant_scoped_event_id(self.tenant_id, self.event_id)
         if self.ttl == 0:
             self.ttl = int(time.time()) + _TTL_90_DAYS
         return self

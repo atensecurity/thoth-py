@@ -25,7 +25,7 @@ def test_behavioral_event_construction():
         session_tool_calls=["read:invoices"],
         occurred_at=datetime.now(timezone.utc),
     )
-    assert event.event_id == "evt_123"
+    assert event.event_id == "trantor:evt_123"
     assert event.source_type == SourceType.AGENT_TOOL_CALL
     assert event.ttl > 0  # auto-set to 90 days
 
