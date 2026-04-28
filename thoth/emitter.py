@@ -10,6 +10,7 @@ from typing import Any
 import boto3
 import httpx
 
+from thoth.http_diagnostics import auth_failure_hint, extract_http_error_detail
 from thoth.logging_config import configure_thoth_logging_from_env
 from thoth.models import BehavioralEvent
 
@@ -154,12 +155,12 @@ class HttpEmitter:
         except httpx.HTTPStatusError as exc:
             response = exc.response
             first_event = events[0] if events else None
-            body = (response.text or "").strip()
-            detail = body[:512] if body else "<empty>"
+            detail = extract_http_error_detail(response)
+            hint = auth_failure_hint(response.status_code, detail)
             logger.error(
                 (
                     "thoth: ingest API rejected telemetry "
-                    "(status=%s url=%s tenant_id=%s agent_id=%s event_type=%s detail=%s)"
+                    "(status=%s url=%s tenant_id=%s agent_id=%s event_type=%s detail=%s)%s"
                 ),
                 response.status_code,
                 str(response.request.url),
@@ -167,6 +168,7 @@ class HttpEmitter:
                 getattr(first_event, "agent_id", None),
                 getattr(first_event, "event_type", None),
                 detail,
+                f" hint={hint}" if hint else "",
                 exc_info=True,
             )
         except Exception as exc:

@@ -6,6 +6,7 @@ from typing import Any
 
 import httpx
 
+from thoth.http_diagnostics import auth_failure_hint, extract_http_error_detail
 from thoth.logging_config import configure_thoth_logging_from_env
 from thoth.models import DecisionType, EnforcementDecision, ThothConfig
 
@@ -16,6 +17,10 @@ _FALLBACK = EnforcementDecision(
     decision=DecisionType.BLOCK,
     reason="enforcer unavailable",
 )
+
+
+def _blocked_with_reason(reason: str) -> EnforcementDecision:
+    return EnforcementDecision(decision=DecisionType.BLOCK, reason=reason)
 
 
 class EnforcerClient:
@@ -66,6 +71,22 @@ class EnforcerClient:
             resp = self._http.post("/v1/enforce", json=self._payload(tool_name, session_id, tool_calls, tool_args=tool_args))
             resp.raise_for_status()
             return EnforcementDecision.model_validate(resp.json())
+        except httpx.HTTPStatusError as exc:
+            response = exc.response
+            detail = extract_http_error_detail(response)
+            hint = auth_failure_hint(response.status_code, detail)
+            logger.error(
+                "thoth: enforcer rejected request (status=%s url=%s tool=%s detail=%s)%s",
+                response.status_code,
+                str(response.request.url),
+                tool_name,
+                detail,
+                f" hint={hint}" if hint else "",
+                exc_info=True,
+            )
+            return _blocked_with_reason(
+                f"enforcer rejected request (status={response.status_code})"
+            )
         except Exception:
             logger.error(
                 "thoth: enforcer unreachable, fail-closed fallback to BLOCK for tool=%s",
@@ -86,6 +107,22 @@ class EnforcerClient:
             resp = await self._async_http.post("/v1/enforce", json=self._payload(tool_name, session_id, tool_calls, tool_args=tool_args))
             resp.raise_for_status()
             return EnforcementDecision.model_validate(resp.json())
+        except httpx.HTTPStatusError as exc:
+            response = exc.response
+            detail = extract_http_error_detail(response)
+            hint = auth_failure_hint(response.status_code, detail)
+            logger.error(
+                "thoth: enforcer rejected request (async, status=%s url=%s tool=%s detail=%s)%s",
+                response.status_code,
+                str(response.request.url),
+                tool_name,
+                detail,
+                f" hint={hint}" if hint else "",
+                exc_info=True,
+            )
+            return _blocked_with_reason(
+                f"enforcer rejected request (status={response.status_code})"
+            )
         except Exception:
             logger.error(
                 "thoth: enforcer unreachable (async), fail-closed fallback to BLOCK for tool=%s",

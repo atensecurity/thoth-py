@@ -1,7 +1,7 @@
 # thoth/tracer.py
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 import functools
 import inspect
 import logging
@@ -23,6 +23,7 @@ from thoth.session import SessionContext
 from thoth.step_up import StepUpClient
 
 logger = logging.getLogger(__name__)
+UTC = timezone.utc
 
 
 def _to_jsonable(value: Any, *, depth: int = 0) -> Any:

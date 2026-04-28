@@ -1,7 +1,7 @@
 # thoth/models.py
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 import os
 import time
@@ -56,6 +56,7 @@ _DECISION_ALIASES: dict[str, DecisionType] = {
 
 
 _TTL_90_DAYS = 90 * 24 * 60 * 60
+UTC = timezone.utc
 
 
 def _tenant_scoped_event_id(tenant_id: str, event_id: str | None) -> str:

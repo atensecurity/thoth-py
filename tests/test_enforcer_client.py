@@ -63,6 +63,20 @@ def test_falls_back_to_block_on_timeout(config):
 
 
 @respx.mock
+def test_blocks_with_http_status_context(config):
+    respx.post(f"{config.resolved_enforcer_url}/v1/enforce").mock(
+        return_value=httpx.Response(
+            403,
+            json={"error": "forbidden", "message": "api key expired"},
+        )
+    )
+    client = EnforcerClient(config)
+    decision = client.check("read:data", session_id="sess_1", tool_calls=[])
+    assert decision.is_block
+    assert "status=403" in (decision.reason or "")
+
+
+@respx.mock
 def test_sends_tool_args_payload(config):
     captured: dict = {}
 
