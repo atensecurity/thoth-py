@@ -589,6 +589,7 @@ if session:
 | `user_id` | `str` | `"system"` | Identity of the user on whose behalf the agent acts. |
 | `enforcement` | `str` | `"progressive"` | Enforcement mode: `observe`, `step_up`, `block`, or `progressive`. |
 | `api_key` | `str \| None` | `$THOTH_API_KEY` | API key from the Aten dashboard. Events sent over HTTPS — no AWS credentials required. |
+| `event_ingest_token` | `str \| None` | `$THOTH_EVENT_INGEST_TOKEN` | Optional dedicated token sent as `X-Thoth-Event-Ingest-Token` for `/v1/events/batch`. |
 | `api_url` | `str \| None` | `$THOTH_API_URL` | Required tenant API base URL used for both event ingestion and policy checks. |
 | `session_id` | `str \| None` | auto-generated UUID | Pass an existing session ID to continue a session across calls. |
 
@@ -602,6 +603,7 @@ if session:
 | `user_id` | `str` | `"system"` | User identity for the session. |
 | `enforcement` | `EnforcementMode` | `PROGRESSIVE` | Enforcement mode. |
 | `api_key` | `str \| None` | `None` | Aten API key. Falls back to `THOTH_API_KEY` env var via `_build_components`. |
+| `event_ingest_token` | `str \| None` | `None` | Optional dedicated token for telemetry ingest. Falls back to `THOTH_EVENT_INGEST_TOKEN`. |
 | `api_url` | `str \| None` | `None` | Required tenant API base URL. Provide directly or via `THOTH_API_URL`. Used for both `/v1/enforce` and `/v1/events/batch`. |
 | `step_up_timeout_minutes` | `int` | `15` | Timeout for step-up approval. |
 | `step_up_poll_interval_seconds` | `int` | `5` | Polling interval for step-up hold status. |
@@ -611,6 +613,7 @@ if session:
 | Variable | Description |
 |---|---|
 | `THOTH_API_KEY` | API key from the Aten dashboard. Enables HTTPS event transport. Example: `thoth_live_abc123...` |
+| `THOTH_EVENT_INGEST_TOKEN` | Optional dedicated telemetry token for `/v1/events/batch` (`X-Thoth-Event-Ingest-Token` header). |
 | `THOTH_API_URL` | Required tenant API base URL for both event ingestion and policy checks. Example: `https://enforce.<tenant>.<apex-domain>` |
 | `THOTH_LOG_LEVEL` | Optional SDK logger level override (`DEBUG`, `INFO`, `WARNING`, `ERROR`). If unset, SDK falls back to `LOG_LEVEL` when present. |
 

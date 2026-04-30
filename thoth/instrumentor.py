@@ -26,10 +26,12 @@ def _build_components(
     session_intent: str | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
+    event_ingest_token: str | None = None,
 ) -> tuple[ThothConfig, SessionContext, HttpEmitter, EnforcerClient, StepUpClient, Tracer]:
     """Construct the full Thoth component stack from caller parameters."""
     configure_thoth_logging_from_env()
     resolved_api_key = api_key or os.getenv("THOTH_API_KEY")
+    resolved_event_ingest_token = event_ingest_token or os.getenv("THOTH_EVENT_INGEST_TOKEN")
     resolved_api_url = (api_url or os.getenv("THOTH_API_URL") or "").strip()
     if not resolved_api_url:
         raise ValueError("Thoth API URL is required (pass api_url or set THOTH_API_URL)")
@@ -41,6 +43,7 @@ def _build_components(
         user_id=user_id,
         enforcement=EnforcementMode(enforcement),
         api_key=resolved_api_key,
+        event_ingest_token=resolved_event_ingest_token,
         api_url=resolved_api_url,
         session_intent=session_intent,
         environment=resolved_environment,
@@ -48,7 +51,11 @@ def _build_components(
     )
     session = SessionContext(config, session_id=session_id)
     _CURRENT_SESSION.set(session)
-    emitter = HttpEmitter(api_url=config.resolved_api_url, api_key=resolved_api_key or "")
+    emitter = HttpEmitter(
+        api_url=config.resolved_api_url,
+        api_key=resolved_api_key or "",
+        event_ingest_token=config.resolved_event_ingest_token,
+    )
     enforcer = EnforcerClient(config)
     step_up = StepUpClient(config)
     tracer = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
@@ -69,6 +76,7 @@ def instrument(
     session_intent: str | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
+    event_ingest_token: str | None = None,
 ) -> Any:
     """
     Instrument an AI agent with Thoth governance.
@@ -92,6 +100,7 @@ def instrument(
         session_intent,
         environment,
         enforcement_trace_id,
+        event_ingest_token,
     )
     _wrap_agent_tools(agent, tracer)
     return agent
@@ -111,6 +120,7 @@ def instrument_anthropic(
     session_intent: str | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
+    event_ingest_token: str | None = None,
 ) -> dict[str, Any]:
     """Instrument tool functions for use in an Anthropic Claude agentic loop.
 
@@ -150,6 +160,7 @@ def instrument_anthropic(
         session_intent,
         environment,
         enforcement_trace_id,
+        event_ingest_token,
     )
     return cast(dict[str, Any], wrap_anthropic_tools(tool_fns, tracer))
 
@@ -168,6 +179,7 @@ def instrument_openai(
     session_intent: str | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
+    event_ingest_token: str | None = None,
 ) -> dict[str, Any]:
     """Instrument tool functions for use in an OpenAI tool-calling loop.
 
@@ -207,6 +219,7 @@ def instrument_openai(
         session_intent,
         environment,
         enforcement_trace_id,
+        event_ingest_token,
     )
     return cast(dict[str, Any], wrap_openai_tools(tool_fns, tracer))
 
@@ -225,6 +238,7 @@ def instrument_claude_agent_sdk(
     session_intent: str | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
+    event_ingest_token: str | None = None,
     emit_tool_lifecycle_hooks: bool = True,
 ) -> Any:
     """Instrument ``claude-agent-sdk`` options with Thoth governance.
@@ -251,6 +265,7 @@ def instrument_claude_agent_sdk(
         session_intent,
         environment,
         enforcement_trace_id,
+        event_ingest_token,
     )
     return instrument_claude_agent_sdk_options(
         options,

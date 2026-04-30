@@ -22,6 +22,12 @@ def auth_failure_hint(status_code: int, detail: str) -> str | None:
         return None
 
     normalized = detail.lower()
+    if status_code == 403 and "<html" in normalized:
+        return (
+            "403 HTML response usually means an ingress/WAF block before enforcer auth executes. "
+            "Check ALB/WAF metrics and exclude /v1/events* telemetry paths from managed body-inspection rules "
+            "while keeping auth, IP reputation, and scoped rate limits enabled."
+        )
     if any(token in normalized for token in ("expired", "invalid", "forbidden", "unauthorized", "scope")):
         return (
             "Thoth API keys authenticate each request directly (no refresh token flow). "

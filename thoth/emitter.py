@@ -103,16 +103,19 @@ class HttpEmitter:
     """Emitter for the Aten-hosted path. Sends events to the Thoth ingest API
     using an API key — no AWS credentials required."""
 
-    def __init__(self, api_url: str, api_key: str) -> None:
+    def __init__(self, api_url: str, api_key: str, event_ingest_token: str = "") -> None:
         configure_thoth_logging_from_env()
         self._endpoint = f"{api_url.rstrip('/')}/v1/events/batch"
         api_key_value = (api_key or "").strip()
+        ingest_token_value = (event_ingest_token or "").strip()
         # Send both auth header styles. Some customer ingress stacks strip or
         # transform Authorization while preserving X-Api-Key.
         headers = {"Content-Type": "application/json"}
         if api_key_value:
             headers["Authorization"] = f"Bearer {api_key_value}"
             headers["X-Api-Key"] = api_key_value
+        if ingest_token_value:
+            headers["X-Thoth-Event-Ingest-Token"] = ingest_token_value
         self._http = httpx.Client(
             headers=headers,
             timeout=_HTTP_TIMEOUT,

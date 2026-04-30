@@ -110,6 +110,9 @@ class ThothConfig(BaseModel):
     # Supply THOTH_API_KEY to use Aten's managed service.
     # Events are sent over HTTPS; no AWS credentials required.
     api_key: str | None = None
+    # Optional dedicated token for event ingestion.
+    # When set, SDK sends X-Thoth-Event-Ingest-Token on /v1/events/batch.
+    event_ingest_token: str | None = None
     api_url: str | None = None
     step_up_timeout_minutes: int = 15
     step_up_poll_interval_seconds: int = 5
@@ -136,6 +139,13 @@ class ThothConfig(BaseModel):
     def resolved_enforcer_url(self) -> str:
         """Enforcer base URL (single-URL contract): same as resolved_api_url."""
         return self.resolved_api_url
+
+    @property
+    def resolved_event_ingest_token(self) -> str:
+        """Dedicated event-ingest token: THOTH_EVENT_INGEST_TOKEN > config field."""
+        if override := os.getenv("THOTH_EVENT_INGEST_TOKEN"):
+            return override.strip()
+        return (self.event_ingest_token or "").strip()
 
 
 class EnforcementDecision(BaseModel):
