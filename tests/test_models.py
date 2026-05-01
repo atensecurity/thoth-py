@@ -1,8 +1,21 @@
 # tests/test_models.py
 from datetime import datetime, timezone
+import json
+from pathlib import Path
 
 import pytest
 from thoth.models import BehavioralEvent, DecisionType, EnforcementDecision, EnforcementMode, EventType, SourceType, ThothConfig
+
+
+def load_golden_fixture(name: str) -> dict:
+    fixture_path = (
+        Path(__file__).resolve().parents[5]
+        / "testdata"
+        / "sdk"
+        / "enforcement_decision_golden.json"
+    )
+    payload = json.loads(fixture_path.read_text(encoding="utf-8"))
+    return payload[name]
 
 
 def test_behavioral_event_requires_mandatory_fields():
@@ -108,3 +121,22 @@ def test_enforcement_decision_parses_reason_code_and_action_classification_alias
     assert decision.is_block
     assert decision.decision_reason_code == "policy_scope_violation"
     assert decision.action_classification == "write"
+
+
+def test_enforcement_decision_parses_expanded_policy_context_fields():
+    decision = EnforcementDecision.model_validate(load_golden_fixture("block_full_context"))
+    assert decision.is_block
+    assert decision.risk_score == 93.7
+    assert decision.latency_ms == 15.4
+    assert decision.pack_id == "security-engineering"
+    assert decision.pack_version == "2026.05.01"
+    assert decision.rule_version == 7
+    assert decision.regulatory_regimes == ["soc2", "hipaa"]
+    assert decision.matched_rule_ids == ["rule-openclaw-001"]
+    assert decision.matched_control_ids == ["cc6.1", "cc7.2"]
+    assert decision.policy_references == ["SOC2 CC6.1", "SOC2 CC7.2"]
+    assert decision.model_signals == ["moses_action:block", "classification:write"]
+    assert decision.receipt == {
+        "signature": "sig-golden-001",
+        "signing_algorithm": "ed25519",
+    }

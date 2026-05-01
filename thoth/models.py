@@ -156,6 +156,17 @@ class EnforcementDecision(BaseModel):
     reason: str | None = None
     violation_id: str | None = None
     hold_token: str | None = None
+    risk_score: float | None = None
+    latency_ms: float | None = None
+    pack_id: str | None = None
+    pack_version: str | None = None
+    rule_version: int | None = None
+    regulatory_regimes: list[str] = Field(default_factory=list)
+    matched_rule_ids: list[str] = Field(default_factory=list)
+    matched_control_ids: list[str] = Field(default_factory=list)
+    policy_references: list[str] = Field(default_factory=list)
+    model_signals: list[str] = Field(default_factory=list)
+    receipt: dict[str, Any] | None = None
     modified_tool_args: dict[str, Any] | None = None
     modification_reason: str | None = None
     defer_reason: str | None = None
@@ -172,6 +183,42 @@ class EnforcementDecision(BaseModel):
             payload["decision_reason_code"] = payload.get("decisionReasonCode")
         if not payload.get("action_classification"):
             payload["action_classification"] = payload.get("actionClassification")
+        if not payload.get("authorization_decision"):
+            payload["authorization_decision"] = payload.get("authorizationDecision")
+        if payload.get("risk_score") is None and payload.get("riskScore") is not None:
+            payload["risk_score"] = payload.get("riskScore")
+        if payload.get("latency_ms") is None and payload.get("latencyMs") is not None:
+            payload["latency_ms"] = payload.get("latencyMs")
+        if not payload.get("pack_id"):
+            payload["pack_id"] = payload.get("packId")
+        if not payload.get("pack_version"):
+            payload["pack_version"] = payload.get("packVersion")
+        if payload.get("rule_version") is None and payload.get("ruleVersion") is not None:
+            payload["rule_version"] = payload.get("ruleVersion")
+        if not payload.get("regulatory_regimes") and payload.get("regulatoryRegimes") is not None:
+            payload["regulatory_regimes"] = payload.get("regulatoryRegimes")
+        if not payload.get("matched_rule_ids") and payload.get("matchedRuleIds") is not None:
+            payload["matched_rule_ids"] = payload.get("matchedRuleIds")
+        if not payload.get("matched_control_ids") and payload.get("matchedControlIds") is not None:
+            payload["matched_control_ids"] = payload.get("matchedControlIds")
+        if not payload.get("policy_references") and payload.get("policyReferences") is not None:
+            payload["policy_references"] = payload.get("policyReferences")
+        if not payload.get("model_signals") and payload.get("modelSignals") is not None:
+            payload["model_signals"] = payload.get("modelSignals")
+        if payload.get("modified_tool_args") is None and payload.get("modifiedToolArgs") is not None:
+            payload["modified_tool_args"] = payload.get("modifiedToolArgs")
+        if not payload.get("modification_reason"):
+            payload["modification_reason"] = payload.get("modificationReason")
+        if not payload.get("defer_reason"):
+            payload["defer_reason"] = payload.get("deferReason")
+        if payload.get("defer_timeout_seconds") is None and payload.get("deferTimeoutSeconds") is not None:
+            payload["defer_timeout_seconds"] = payload.get("deferTimeoutSeconds")
+        if payload.get("step_up_timeout_seconds") is None and payload.get("stepUpTimeoutSeconds") is not None:
+            payload["step_up_timeout_seconds"] = payload.get("stepUpTimeoutSeconds")
+        if payload.get("violation_id") is None and payload.get("violationId") is not None:
+            payload["violation_id"] = payload.get("violationId")
+        if payload.get("hold_token") is None and payload.get("holdToken") is not None:
+            payload["hold_token"] = payload.get("holdToken")
         raw = payload.get("decision")
         if not raw:
             raw = payload.get("authorization_decision")

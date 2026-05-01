@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import functools
 import inspect
 import logging
+from time import perf_counter
 from typing import Any, Callable, cast
 
 from thoth.emitter import SqsEmitter
@@ -53,6 +54,18 @@ def _tool_args_from_call(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[
     return payload
 
 
+def _payload_size(value: Any) -> int:
+    rendered = str(value)
+    return len(rendered.encode("utf-8", errors="replace"))
+
+
+def _result_summary(result: Any) -> dict[str, Any]:
+    return {
+        "result_type": type(result).__name__,
+        "result_size_bytes": _payload_size(result),
+    }
+
+
 def _apply_modified_call_args(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
@@ -90,6 +103,104 @@ def _apply_modified_call_args(
     return args, kwargs
 
 
+def _decision_context(decision: EnforcementDecision) -> dict[str, Any]:
+    return {
+        "decision_reason_code": decision.decision_reason_code,
+        "action_classification": decision.action_classification,
+        "authorization_decision": decision.authorization_decision or decision.decision.value,
+        "defer_timeout_seconds": decision.defer_timeout_seconds,
+        "step_up_timeout_seconds": decision.step_up_timeout_seconds,
+        "risk_score": decision.risk_score,
+        "latency_ms": decision.latency_ms,
+        "pack_id": decision.pack_id,
+        "pack_version": decision.pack_version,
+        "rule_version": decision.rule_version,
+        "regulatory_regimes": list(decision.regulatory_regimes),
+        "matched_rule_ids": list(decision.matched_rule_ids),
+        "matched_control_ids": list(decision.matched_control_ids),
+        "policy_references": list(decision.policy_references),
+        "model_signals": list(decision.model_signals),
+        "receipt": decision.receipt,
+    }
+
+
+def _merge_decision_context(
+    primary: EnforcementDecision,
+    fallback: EnforcementDecision,
+) -> dict[str, Any]:
+    primary_ctx = _decision_context(primary)
+    fallback_ctx = _decision_context(fallback)
+    merged: dict[str, Any] = {}
+    for key in primary_ctx:
+        primary_value = primary_ctx[key]
+        fallback_value = fallback_ctx.get(key)
+        if isinstance(primary_value, list):
+            merged[key] = primary_value or (fallback_value if isinstance(fallback_value, list) else [])
+            continue
+        if primary_value is None:
+            merged[key] = fallback_value
+            continue
+        merged[key] = primary_value
+    return merged
+
+
+def _violation_from_decision(
+    tool_name: str,
+    reason: str,
+    decision: EnforcementDecision,
+    *,
+    fallback_decision: EnforcementDecision | None = None,
+) -> ThothPolicyViolation:
+    context = (
+        _merge_decision_context(decision, fallback_decision)
+        if fallback_decision is not None
+        else _decision_context(decision)
+    )
+    return ThothPolicyViolation(
+        tool_name=tool_name,
+        reason=reason,
+        violation_id=decision.violation_id or (fallback_decision.violation_id if fallback_decision else None),
+        decision_reason_code=context.get("decision_reason_code"),
+        action_classification=context.get("action_classification"),
+        authorization_decision=context.get("authorization_decision"),
+        defer_timeout_seconds=context.get("defer_timeout_seconds"),
+        step_up_timeout_seconds=context.get("step_up_timeout_seconds"),
+        risk_score=context.get("risk_score"),
+        latency_ms=context.get("latency_ms"),
+        pack_id=context.get("pack_id"),
+        pack_version=context.get("pack_version"),
+        rule_version=context.get("rule_version"),
+        regulatory_regimes=context.get("regulatory_regimes"),
+        matched_rule_ids=context.get("matched_rule_ids"),
+        matched_control_ids=context.get("matched_control_ids"),
+        policy_references=context.get("policy_references"),
+        model_signals=context.get("model_signals"),
+        receipt=context.get("receipt"),
+    )
+
+
+def _policy_violation_metadata(exc: ThothPolicyViolation) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "decision_reason_code": exc.decision_reason_code,
+        "action_classification": exc.action_classification,
+        "authorization_decision": exc.authorization_decision,
+        "defer_timeout_seconds": exc.defer_timeout_seconds,
+        "step_up_timeout_seconds": exc.step_up_timeout_seconds,
+        "risk_score": exc.risk_score,
+        "latency_ms": exc.latency_ms,
+        "pack_id": exc.pack_id,
+        "pack_version": exc.pack_version,
+        "rule_version": exc.rule_version,
+        "regulatory_regimes": exc.regulatory_regimes,
+        "matched_rule_ids": exc.matched_rule_ids,
+        "matched_control_ids": exc.matched_control_ids,
+        "policy_references": exc.policy_references,
+        "model_signals": exc.model_signals,
+        "receipt": exc.receipt,
+    }
+    return {k: v for k, v in metadata.items() if v is not None}
+
+
 class Tracer:
     def __init__(
         self,
@@ -111,8 +222,17 @@ class Tracer:
 
             @functools.wraps(fn)
             async def async_wrapped(*args: Any, **kwargs: Any) -> Any:
-                self._emit(tool_name, EventType.TOOL_CALL_PRE, str(args))
                 tool_args = _tool_args_from_call(args, kwargs)
+                started = perf_counter()
+                self._emit(
+                    tool_name,
+                    EventType.TOOL_CALL_PRE,
+                    "tool invocation requested",
+                    metadata={
+                        **self._base_tool_metadata(tool_name, tool_args),
+                        "event_phase": "pre",
+                    },
+                )
                 try:
                     effective_args, effective_kwargs = await self._aenforce(
                         tool_name,
@@ -121,19 +241,50 @@ class Tracer:
                         call_kwargs=kwargs,
                     )  # async path — does not block event loop
                 except ThothPolicyViolation as exc:
-                    self._emit(tool_name, EventType.TOOL_CALL_BLOCK, exc.reason, violation_id=exc.violation_id)
+                    self._emit(
+                        tool_name,
+                        EventType.TOOL_CALL_BLOCK,
+                        exc.reason,
+                        violation_id=exc.violation_id,
+                        metadata={
+                            **self._base_tool_metadata(tool_name, tool_args),
+                            "event_phase": "block",
+                            "duration_ms": int((perf_counter() - started) * 1000),
+                            **_policy_violation_metadata(exc),
+                        },
+                    )
                     raise
                 result = await fn(*effective_args, **effective_kwargs)
                 self._session.record_tool_call(tool_name)
-                self._emit(tool_name, EventType.TOOL_CALL_POST, str(result))
+                self._emit(
+                    tool_name,
+                    EventType.TOOL_CALL_POST,
+                    "tool invocation completed",
+                    metadata={
+                        **self._base_tool_metadata(tool_name, tool_args),
+                        "event_phase": "post",
+                        "duration_ms": int((perf_counter() - started) * 1000),
+                        "authorization_decision": "ALLOW",
+                        **_result_summary(result),
+                    },
+                )
                 return result
 
             return async_wrapped
 
         @functools.wraps(fn)
         def sync_wrapped(*args: Any, **kwargs: Any) -> Any:
-            self._emit(tool_name, EventType.TOOL_CALL_PRE, str(args))
             tool_args = _tool_args_from_call(args, kwargs)
+            started = perf_counter()
+            self._emit(
+                tool_name,
+                EventType.TOOL_CALL_PRE,
+                "tool invocation requested",
+                metadata={
+                    **self._base_tool_metadata(tool_name, tool_args),
+                    "event_phase": "pre",
+                },
+            )
             try:
                 effective_args, effective_kwargs = self._enforce(
                     tool_name,
@@ -142,11 +293,33 @@ class Tracer:
                     call_kwargs=kwargs,
                 )
             except ThothPolicyViolation as exc:
-                self._emit(tool_name, EventType.TOOL_CALL_BLOCK, exc.reason, violation_id=exc.violation_id)
+                self._emit(
+                    tool_name,
+                    EventType.TOOL_CALL_BLOCK,
+                    exc.reason,
+                    violation_id=exc.violation_id,
+                    metadata={
+                        **self._base_tool_metadata(tool_name, tool_args),
+                        "event_phase": "block",
+                        "duration_ms": int((perf_counter() - started) * 1000),
+                        **_policy_violation_metadata(exc),
+                    },
+                )
                 raise
             result = fn(*effective_args, **effective_kwargs)
             self._session.record_tool_call(tool_name)
-            self._emit(tool_name, EventType.TOOL_CALL_POST, str(result))
+            self._emit(
+                tool_name,
+                EventType.TOOL_CALL_POST,
+                "tool invocation completed",
+                metadata={
+                    **self._base_tool_metadata(tool_name, tool_args),
+                    "event_phase": "post",
+                    "duration_ms": int((perf_counter() - started) * 1000),
+                    "authorization_decision": "ALLOW",
+                    **_result_summary(result),
+                },
+            )
             return result
 
         return sync_wrapped
@@ -177,23 +350,27 @@ class Tracer:
             tool_args=tool_args,
         )
         self._log_decision(tool_name, decision, async_path=False)
+        step_up_initial: EnforcementDecision | None = None
         if decision.is_step_up and decision.hold_token:
+            step_up_initial = decision
             decision = self._step_up.wait(decision.hold_token)
             self._log_decision(tool_name, decision, async_path=False, phase="step_up_resolved")
         if decision.is_defer:
             reason = decision.defer_reason or decision.reason or "deferred pending additional context"
             if decision.defer_timeout_seconds and decision.defer_timeout_seconds > 0:
                 reason = f"{reason} (retry in {decision.defer_timeout_seconds}s)"
-            raise ThothPolicyViolation(
-                tool_name=tool_name,
-                reason=reason,
-                violation_id=decision.violation_id,
+            raise _violation_from_decision(
+                tool_name,
+                reason,
+                decision,
+                fallback_decision=step_up_initial,
             )
         if decision.is_block:
-            raise ThothPolicyViolation(
-                tool_name=tool_name,
-                reason=decision.reason or "blocked by Thoth policy",
-                violation_id=decision.violation_id,
+            raise _violation_from_decision(
+                tool_name,
+                decision.reason or "blocked by Thoth policy",
+                decision,
+                fallback_decision=step_up_initial,
             )
         if decision.is_modify:
             return _apply_modified_call_args(call_args, kwargs, decision.modified_tool_args)
@@ -225,29 +402,60 @@ class Tracer:
             tool_args=tool_args,
         )
         self._log_decision(tool_name, decision, async_path=True)
+        step_up_initial: EnforcementDecision | None = None
         if decision.is_step_up and decision.hold_token:
+            step_up_initial = decision
             decision = await self._step_up.await_decision(decision.hold_token)
             self._log_decision(tool_name, decision, async_path=True, phase="step_up_resolved")
         if decision.is_defer:
             reason = decision.defer_reason or decision.reason or "deferred pending additional context"
             if decision.defer_timeout_seconds and decision.defer_timeout_seconds > 0:
                 reason = f"{reason} (retry in {decision.defer_timeout_seconds}s)"
-            raise ThothPolicyViolation(
-                tool_name=tool_name,
-                reason=reason,
-                violation_id=decision.violation_id,
+            raise _violation_from_decision(
+                tool_name,
+                reason,
+                decision,
+                fallback_decision=step_up_initial,
             )
         if decision.is_block:
-            raise ThothPolicyViolation(
-                tool_name=tool_name,
-                reason=decision.reason or "blocked by Thoth policy",
-                violation_id=decision.violation_id,
+            raise _violation_from_decision(
+                tool_name,
+                decision.reason or "blocked by Thoth policy",
+                decision,
+                fallback_decision=step_up_initial,
             )
         if decision.is_modify:
             return _apply_modified_call_args(call_args, kwargs, decision.modified_tool_args)
         return call_args, kwargs
 
-    def _emit(self, tool_name: str, event_type: EventType, content: str, *, violation_id: str | None = None) -> None:
+    def _base_tool_metadata(
+        self,
+        tool_name: str,
+        tool_args: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        trace_id = self._config.enforcement_trace_id or self._session.session_id
+        metadata: dict[str, Any] = {
+            "sdk_language": "python",
+            "environment": self._config.environment,
+            "enforcement_trace_id": trace_id,
+            "tool_call": {
+                "name": tool_name,
+                "arguments": _to_jsonable(tool_args or {}),
+            },
+        }
+        if tool_args:
+            metadata["tool_args"] = _to_jsonable(tool_args)
+        return metadata
+
+    def _emit(
+        self,
+        tool_name: str,
+        event_type: EventType,
+        content: str,
+        *,
+        violation_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         event = BehavioralEvent(
             tenant_id=self._config.tenant_id,
             agent_id=self._config.agent_id,
@@ -257,6 +465,7 @@ class Tracer:
             event_type=event_type,
             tool_name=tool_name,
             content=content,
+            metadata={k: v for k, v in (metadata or {}).items() if v is not None},
             approved_scope=self._config.approved_scope,
             enforcement_mode=self._config.enforcement,
             session_tool_calls=list(self._session.tool_calls),

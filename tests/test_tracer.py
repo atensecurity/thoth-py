@@ -46,6 +46,15 @@ def test_emits_pre_and_post_events(tracer):
     wrapped = tracer.wrap_tool("read:data", tool)
     wrapped()
     assert tracer._emitter.emit.call_count == 2  # PRE + POST
+    pre_event = tracer._emitter.emit.call_args_list[0].args[0]
+    post_event = tracer._emitter.emit.call_args_list[1].args[0]
+    assert pre_event.metadata["event_phase"] == "pre"
+    assert pre_event.metadata["tool_call"]["name"] == "read:data"
+    assert pre_event.metadata["sdk_language"] == "python"
+    assert post_event.metadata["event_phase"] == "post"
+    assert post_event.metadata["authorization_decision"] == "ALLOW"
+    assert post_event.metadata["result_type"] == "str"
+    assert isinstance(post_event.metadata["duration_ms"], int)
 
 
 def test_records_tool_call_in_session(tracer):
@@ -73,6 +82,12 @@ def test_raises_policy_violation_on_block(config):
         decision=DecisionType.BLOCK,
         reason="out of scope",
         violation_id="vio_123",
+        decision_reason_code="tool_not_allowed_for_session_intent",
+        action_classification="context_deny",
+        authorization_decision="DENY",
+        risk_score=87.5,
+        pack_id="engineering",
+        model_signals=["moses_action:block"],
     )
     t = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
     tool = MagicMock()
@@ -80,7 +95,16 @@ def test_raises_policy_violation_on_block(config):
     with pytest.raises(ThothPolicyViolation) as exc:
         wrapped()
     assert "write:s3" in str(exc.value)
+    assert exc.value.decision_reason_code == "tool_not_allowed_for_session_intent"
+    assert exc.value.authorization_decision == "DENY"
+    assert exc.value.risk_score == 87.5
+    assert exc.value.pack_id == "engineering"
+    assert exc.value.model_signals == ["moses_action:block"]
     tool.assert_not_called()  # tool never ran
+    block_event = emitter.emit.call_args_list[1].args[0]
+    assert block_event.metadata["risk_score"] == 87.5
+    assert block_event.metadata["pack_id"] == "engineering"
+    assert block_event.metadata["model_signals"] == ["moses_action:block"]
 
 
 def test_waits_for_step_up_then_allows(config):
