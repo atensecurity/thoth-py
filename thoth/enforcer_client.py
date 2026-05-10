@@ -57,6 +57,12 @@ class EnforcerClient:
             payload["tool_args"] = tool_args
         if self._config.session_intent is not None:
             payload["session_intent"] = self._config.session_intent
+        if self._config.purpose is not None:
+            payload["purpose"] = self._config.purpose
+        if self._config.data_classification is not None:
+            payload["data_classification"] = self._config.data_classification
+        if self._config.task_context:
+            payload["task_context"] = self._config.task_context
         return payload
 
     def check(
@@ -84,9 +90,7 @@ class EnforcerClient:
                 f" hint={hint}" if hint else "",
                 exc_info=True,
             )
-            return _blocked_with_reason(
-                f"enforcer rejected request (status={response.status_code})"
-            )
+            return _blocked_with_reason(f"enforcer rejected request (status={response.status_code})")
         except Exception:
             logger.error(
                 "thoth: enforcer unreachable, fail-closed fallback to BLOCK for tool=%s",
@@ -120,9 +124,7 @@ class EnforcerClient:
                 f" hint={hint}" if hint else "",
                 exc_info=True,
             )
-            return _blocked_with_reason(
-                f"enforcer rejected request (status={response.status_code})"
-            )
+            return _blocked_with_reason(f"enforcer rejected request (status={response.status_code})")
         except Exception:
             logger.error(
                 "thoth: enforcer unreachable (async), fail-closed fallback to BLOCK for tool=%s",

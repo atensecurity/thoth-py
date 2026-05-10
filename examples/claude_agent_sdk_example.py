@@ -34,15 +34,15 @@ async def prompt_stream():
 async def main() -> None:
     options = ClaudeAgentOptions(
         max_turns=1,
-        allowed_tools=["Read"],       # Claude SDK auto-approval list
-        disallowed_tools=["Bash"],    # explicit hard deny in Claude SDK
+        allowed_tools=["Read"],  # Claude SDK auto-approval list
+        disallowed_tools=["Bash"],  # explicit hard deny in Claude SDK
         cwd=Path.cwd(),
     )
 
     options = thoth.instrument_claude_agent_sdk(
         options,
         agent_id="claude-agent-sdk-demo",
-        approved_scope=["Read"],      # Thoth policy scope
+        approved_scope=["Read"],  # Thoth policy scope
         tenant_id=os.environ["THOTH_TENANT_ID"],
         user_id="alice@example.com",
         enforcement="block",

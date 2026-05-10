@@ -24,6 +24,9 @@ def _build_components(
     api_url: str | None,
     session_id: str | None,
     session_intent: str | None = None,
+    purpose: str | None = None,
+    data_classification: str | None = None,
+    task_context: dict[str, Any] | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
@@ -46,6 +49,9 @@ def _build_components(
         event_ingest_token=resolved_event_ingest_token,
         api_url=resolved_api_url,
         session_intent=session_intent,
+        purpose=purpose,
+        data_classification=data_classification,
+        task_context=task_context or {},
         environment=resolved_environment,
         enforcement_trace_id=enforcement_trace_id,
     )
@@ -69,11 +75,14 @@ def instrument(
     approved_scope: list[str],
     tenant_id: str,
     user_id: str = "system",
-    enforcement: str = "progressive",
+    enforcement: str = "block",
     api_key: str | None = None,
     api_url: str | None = None,
     session_id: str | None = None,
     session_intent: str | None = None,
+    purpose: str | None = None,
+    data_classification: str | None = None,
+    task_context: dict[str, Any] | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
@@ -98,6 +107,9 @@ def instrument(
         api_url,
         session_id,
         session_intent,
+        purpose,
+        data_classification,
+        task_context,
         environment,
         enforcement_trace_id,
         event_ingest_token,
@@ -113,11 +125,14 @@ def instrument_anthropic(
     approved_scope: list[str],
     tenant_id: str,
     user_id: str = "system",
-    enforcement: str = "progressive",
+    enforcement: str = "block",
     api_key: str | None = None,
     api_url: str | None = None,
     session_id: str | None = None,
     session_intent: str | None = None,
+    purpose: str | None = None,
+    data_classification: str | None = None,
+    task_context: dict[str, Any] | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
@@ -135,7 +150,7 @@ def instrument_anthropic(
         tenant_id: Your Thoth tenant identifier.
         user_id: User initiating the session. Defaults to ``"system"``.
         enforcement: ``"observe"`` | ``"block"`` | ``"step_up"`` |
-            ``"progressive"`` (default).
+            ``"progressive"`` (default: ``"block"``).
         api_key: Thoth API key (or set ``THOTH_API_KEY`` env var).
         api_url: Optional tenant API base URL for both event ingestion and
             policy checks.
@@ -158,6 +173,9 @@ def instrument_anthropic(
         api_url,
         session_id,
         session_intent,
+        purpose,
+        data_classification,
+        task_context,
         environment,
         enforcement_trace_id,
         event_ingest_token,
@@ -172,11 +190,14 @@ def instrument_openai(
     approved_scope: list[str],
     tenant_id: str,
     user_id: str = "system",
-    enforcement: str = "progressive",
+    enforcement: str = "block",
     api_key: str | None = None,
     api_url: str | None = None,
     session_id: str | None = None,
     session_intent: str | None = None,
+    purpose: str | None = None,
+    data_classification: str | None = None,
+    task_context: dict[str, Any] | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
@@ -194,7 +215,7 @@ def instrument_openai(
         tenant_id: Your Thoth tenant identifier.
         user_id: User initiating the session. Defaults to ``"system"``.
         enforcement: ``"observe"`` | ``"block"`` | ``"step_up"`` |
-            ``"progressive"`` (default).
+            ``"progressive"`` (default: ``"block"``).
         api_key: Thoth API key (or set ``THOTH_API_KEY`` env var).
         api_url: Optional tenant API base URL for both event ingestion and
             policy checks.
@@ -217,6 +238,9 @@ def instrument_openai(
         api_url,
         session_id,
         session_intent,
+        purpose,
+        data_classification,
+        task_context,
         environment,
         enforcement_trace_id,
         event_ingest_token,
@@ -231,11 +255,14 @@ def instrument_claude_agent_sdk(
     approved_scope: list[str],
     tenant_id: str,
     user_id: str = "system",
-    enforcement: str = "progressive",
+    enforcement: str = "block",
     api_key: str | None = None,
     api_url: str | None = None,
     session_id: str | None = None,
     session_intent: str | None = None,
+    purpose: str | None = None,
+    data_classification: str | None = None,
+    task_context: dict[str, Any] | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
@@ -263,6 +290,9 @@ def instrument_claude_agent_sdk(
         api_url,
         session_id,
         session_intent,
+        purpose,
+        data_classification,
+        task_context,
         environment,
         enforcement_trace_id,
         event_ingest_token,

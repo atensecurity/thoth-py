@@ -34,10 +34,7 @@ def auth_failure_hint(status_code: int, detail: str) -> str | None:
             "Re-issue or re-scope the key with `thothctl api-keys create ... --permission execute` "
             "and update THOTH_API_KEY/THOTH_API_KEY_FILE on the endpoint."
         )
-    return (
-        "Auth was rejected. Verify endpoint/fleet/agent scope, key TTL, and tenant binding. "
-        "Thoth API keys are used directly per request and must be rotated when expired."
-    )
+    return "Auth was rejected. Verify endpoint/fleet/agent scope, key TTL, and tenant binding. Thoth API keys are used directly per request and must be rotated when expired."
 
 
 def _extract_json_detail(response: httpx.Response) -> str:

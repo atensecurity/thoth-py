@@ -21,7 +21,7 @@ description = "AI agent governance SDK by Aten Security"
 name = "aten-thoth"
 packages = [{include = "thoth"}]
 readme = "README.md"
-version = "0.1.15"
+version = "0.5.11"
 
 [tool.poetry.dependencies]
 anyio = ">=4.0"

@@ -1,7 +1,7 @@
 # thoth/models.py
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 import os
 import time
@@ -56,7 +56,7 @@ _DECISION_ALIASES: dict[str, DecisionType] = {
 
 
 _TTL_90_DAYS = 90 * 24 * 60 * 60
-UTC = timezone.utc
+UTC = UTC
 
 
 def _tenant_scoped_event_id(tenant_id: str, event_id: str | None) -> str:
@@ -73,12 +73,18 @@ class BehavioralEvent(BaseModel):
     agent_id: str | None = None
     session_id: str
     user_id: str
+    purpose: str | None = None
+    data_classification: str | None = None
+    task_context: dict[str, Any] = Field(default_factory=dict)
+    initiated_by: str | None = None
+    task_id: str | None = None
+    delegation_chain: list[str] = Field(default_factory=list)
     source_type: SourceType
     event_type: EventType
     content: str
     metadata: dict[str, Any] = Field(default_factory=dict)
     approved_scope: list[str] = Field(default_factory=list)
-    enforcement_mode: EnforcementMode = EnforcementMode.PROGRESSIVE
+    enforcement_mode: EnforcementMode = EnforcementMode.BLOCK
     session_tool_calls: list[str] = Field(default_factory=list)
     tool_name: str = ""
     endpoint_id: str | None = None
@@ -106,7 +112,7 @@ class ThothConfig(BaseModel):
     approved_scope: list[str]
     tenant_id: str
     user_id: str = "system"
-    enforcement: EnforcementMode = EnforcementMode.PROGRESSIVE
+    enforcement: EnforcementMode = EnforcementMode.BLOCK
     # Supply THOTH_API_KEY to use Aten's managed service.
     # Events are sent over HTTPS; no AWS credentials required.
     api_key: str | None = None
@@ -120,6 +126,12 @@ class ThothConfig(BaseModel):
     # When a compliance pack defines session_scopes, tools outside the declared
     # intent are step-up-challenged even if they appear in the approved scope.
     session_intent: str | None = None
+    # Optional purpose context for policy/DLP enforcement.
+    purpose: str | None = None
+    # Optional data sensitivity label for policy/DLP enforcement.
+    data_classification: str | None = None
+    # Optional delegation/task context with initiated_by/task_id/chain keys.
+    task_context: dict[str, Any] = Field(default_factory=dict)
     # Env-scoped policy lookup at enforcer side ("dev", "staging", "prod", ...).
     environment: str = "prod"
     # Optional correlation identifier propagated across enforcer/fastml/deepllm.
@@ -150,6 +162,8 @@ class ThothConfig(BaseModel):
 
 class EnforcementDecision(BaseModel):
     decision: DecisionType
+    decision_envelope_version: str | None = None
+    enforcement_trace_id: str | None = None
     authorization_decision: str | None = None
     decision_reason_code: str | None = None
     action_classification: str | None = None
@@ -157,6 +171,10 @@ class EnforcementDecision(BaseModel):
     violation_id: str | None = None
     hold_token: str | None = None
     risk_score: float | None = None
+    fastml_features: dict[str, float] | None = None
+    score_components: dict[str, Any] | None = None
+    top_contributors: list[dict[str, Any]] = Field(default_factory=list)
+    decision_evidence: dict[str, Any] | None = None
     latency_ms: float | None = None
     pack_id: str | None = None
     pack_version: str | None = None
@@ -187,6 +205,22 @@ class EnforcementDecision(BaseModel):
             payload["authorization_decision"] = payload.get("authorizationDecision")
         if payload.get("risk_score") is None and payload.get("riskScore") is not None:
             payload["risk_score"] = payload.get("riskScore")
+        if not payload.get("enforcement_trace_id"):
+            payload["enforcement_trace_id"] = payload.get("enforcementTraceId")
+        if payload.get("fastml_features") is None and payload.get("fastmlFeatures") is not None:
+            payload["fastml_features"] = payload.get("fastmlFeatures")
+        if payload.get("score_components") is None and payload.get("scoreComponents") is not None:
+            payload["score_components"] = payload.get("scoreComponents")
+        if not payload.get("top_contributors") and payload.get("topContributors") is not None:
+            payload["top_contributors"] = payload.get("topContributors")
+        if payload.get("decision_evidence") is None and payload.get("decisionEvidence") is not None:
+            payload["decision_evidence"] = payload.get("decisionEvidence")
+        if payload.get("decision_evidence") is None and isinstance(payload.get("metadata"), dict):
+            payload["decision_evidence"] = payload["metadata"].get("decision_evidence")
+        if not payload.get("decision_envelope_version"):
+            payload["decision_envelope_version"] = payload.get("decisionEnvelopeVersion")
+        if not payload.get("decision_envelope_version") and isinstance(payload.get("decision_evidence"), dict):
+            payload["decision_envelope_version"] = payload["decision_evidence"].get("decision_envelope_version")
         if payload.get("latency_ms") is None and payload.get("latencyMs") is not None:
             payload["latency_ms"] = payload.get("latencyMs")
         if not payload.get("pack_id"):

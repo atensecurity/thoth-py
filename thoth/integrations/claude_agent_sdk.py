@@ -23,10 +23,7 @@ def _load_claude_agent_sdk_types() -> dict[str, type[Any]]:
     try:
         types_mod = importlib.import_module("claude_agent_sdk.types")
     except ImportError as exc:
-        raise ImportError(
-            "claude-agent-sdk is required for this integration. "
-            'Install it with: pip install "claude-agent-sdk"'
-        ) from exc
+        raise ImportError('claude-agent-sdk is required for this integration. Install it with: pip install "claude-agent-sdk"') from exc
 
     return {
         "ClaudeAgentOptions": types_mod.ClaudeAgentOptions,
@@ -62,9 +59,7 @@ def instrument_claude_agent_sdk_options(
     if options is None:
         options = ClaudeAgentOptions()
     if not isinstance(options, ClaudeAgentOptions):
-        raise TypeError(
-            "options must be an instance of claude_agent_sdk.types.ClaudeAgentOptions"
-        )
+        raise TypeError("options must be an instance of claude_agent_sdk.types.ClaudeAgentOptions")
 
     model_name = str(getattr(options, "model", "") or "").strip() or "unspecified"
     tracer._emit(
@@ -97,16 +92,8 @@ def instrument_claude_agent_sdk_options(
             )
             return PermissionResultDeny(message=exc.reason, interrupt=False)
 
-        updated_input = (
-            call_args[0]
-            if call_args and isinstance(call_args[0], dict)
-            else tool_input
-        )
-        if (
-            isinstance(updated_input, dict)
-            and set(updated_input.keys()) == {"input"}
-            and isinstance(updated_input.get("input"), dict)
-        ):
+        updated_input = call_args[0] if call_args and isinstance(call_args[0], dict) else tool_input
+        if isinstance(updated_input, dict) and set(updated_input.keys()) == {"input"} and isinstance(updated_input.get("input"), dict):
             updated_input = updated_input["input"]
 
         if existing_can_use_tool is not None:

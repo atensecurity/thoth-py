@@ -93,7 +93,7 @@ agent = thoth.instrument(
     tenant_id=os.environ["THOTH_TENANT_ID"],
     api_url=os.environ["THOTH_API_URL"],
     user_id="alice@example.com",
-    enforcement="progressive",   # observe → step_up → block
+    enforcement="block",   # default deny
     # api_key set via THOTH_API_KEY env var
 )
 
@@ -496,7 +496,7 @@ Set via the `enforcement` parameter to `instrument()`.
 | Observe | `observe` | All tool calls pass through. Events are still emitted for audit. No blocking, no step-up. Use for initial rollout and baselining. |
 | Step-Up | `step_up` | Suspicious calls trigger a human approval request (e.g. Slack DM to a reviewer). Tool execution is held until approved or timed out. |
 | Block | `block` | Calls that violate policy raise `ThothPolicyViolation` immediately. |
-| Progressive | `progressive` | Default. Enforcer chooses the appropriate response per tool call based on policy rules. |
+| Progressive | `progressive` | Escalating mode. Enforcer chooses the appropriate response per tool call based on policy rules. |
 
 ---
 
@@ -587,7 +587,7 @@ if session:
 | `approved_scope` | `list[str]` | — | List of tool names this agent is authorized to call. |
 | `tenant_id` | `str` | — | Your Maat tenant ID. |
 | `user_id` | `str` | `"system"` | Identity of the user on whose behalf the agent acts. |
-| `enforcement` | `str` | `"progressive"` | Enforcement mode: `observe`, `step_up`, `block`, or `progressive`. |
+| `enforcement` | `str` | `"block"` | Enforcement mode: `observe`, `step_up`, `block`, or `progressive`. |
 | `api_key` | `str \| None` | `$THOTH_API_KEY` | API key from the Aten dashboard. Events sent over HTTPS — no AWS credentials required. |
 | `event_ingest_token` | `str \| None` | `$THOTH_EVENT_INGEST_TOKEN` | Optional dedicated token sent as `X-Thoth-Event-Ingest-Token` for `/v1/events/batch`. |
 | `api_url` | `str \| None` | `$THOTH_API_URL` | Required tenant API base URL used for both event ingestion and policy checks. |
@@ -601,7 +601,7 @@ if session:
 | `approved_scope` | `list[str]` | — | Tool names the agent is authorized to call. |
 | `tenant_id` | `str` | — | Your Maat tenant ID. |
 | `user_id` | `str` | `"system"` | User identity for the session. |
-| `enforcement` | `EnforcementMode` | `PROGRESSIVE` | Enforcement mode. |
+| `enforcement` | `EnforcementMode` | `BLOCK` | Enforcement mode. |
 | `api_key` | `str \| None` | `None` | Aten API key. Falls back to `THOTH_API_KEY` env var via `_build_components`. |
 | `event_ingest_token` | `str \| None` | `None` | Optional dedicated token for telemetry ingest. Falls back to `THOTH_EVENT_INGEST_TOKEN`. |
 | `api_url` | `str \| None` | `None` | Required tenant API base URL. Provide directly or via `THOTH_API_URL`. Used for both `/v1/enforce` and `/v1/events/batch`. |

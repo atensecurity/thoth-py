@@ -111,9 +111,7 @@ def test_instrument_uses_thoth_environment_env_var(monkeypatch: pytest.MonkeyPat
 def test_instrument_uses_event_ingest_token_env_var(monkeypatch: pytest.MonkeyPatch):
     agent = FakeAgent(tools=[FakeTool()])
     monkeypatch.setenv("THOTH_EVENT_INGEST_TOKEN", "ingest-token-123")
-    with patch("thoth.instrumentor.EnforcerClient"), patch("thoth.instrumentor.Tracer"), patch(
-        "thoth.instrumentor.HttpEmitter"
-    ) as mock_emitter:
+    with patch("thoth.instrumentor.EnforcerClient"), patch("thoth.instrumentor.Tracer"), patch("thoth.instrumentor.HttpEmitter") as mock_emitter:
         thoth.instrument(
             agent,
             agent_id="my-agent",

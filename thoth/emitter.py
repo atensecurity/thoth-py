@@ -161,10 +161,7 @@ class HttpEmitter:
             detail = extract_http_error_detail(response)
             hint = auth_failure_hint(response.status_code, detail)
             logger.error(
-                (
-                    "thoth: ingest API rejected telemetry "
-                    "(status=%s url=%s tenant_id=%s agent_id=%s event_type=%s detail=%s)%s"
-                ),
+                ("thoth: ingest API rejected telemetry (status=%s url=%s tenant_id=%s agent_id=%s event_type=%s detail=%s)%s"),
                 response.status_code,
                 str(response.request.url),
                 getattr(first_event, "tenant_id", None),

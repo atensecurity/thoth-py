@@ -88,6 +88,10 @@ def test_raises_policy_violation_on_block(config):
         risk_score=87.5,
         pack_id="engineering",
         model_signals=["moses_action:block"],
+        enforcement_trace_id="trace-abc",
+        score_components={"model_score": 87.5},
+        top_contributors=[{"feature": "drift_score", "contribution_points": 35.0}],
+        decision_evidence={"decision": "BLOCK", "authorization_decision": "DENY"},
     )
     t = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
     tool = MagicMock()
@@ -100,11 +104,17 @@ def test_raises_policy_violation_on_block(config):
     assert exc.value.risk_score == 87.5
     assert exc.value.pack_id == "engineering"
     assert exc.value.model_signals == ["moses_action:block"]
+    assert exc.value.enforcement_trace_id == "trace-abc"
+    assert exc.value.score_components == {"model_score": 87.5}
+    assert exc.value.decision_evidence == {"decision": "BLOCK", "authorization_decision": "DENY"}
     tool.assert_not_called()  # tool never ran
     block_event = emitter.emit.call_args_list[1].args[0]
     assert block_event.metadata["risk_score"] == 87.5
     assert block_event.metadata["pack_id"] == "engineering"
     assert block_event.metadata["model_signals"] == ["moses_action:block"]
+    assert block_event.metadata["enforcement_trace_id"] == "trace-abc"
+    assert block_event.metadata["score_components"] == {"model_score": 87.5}
+    assert block_event.metadata["decision_evidence"] == {"decision": "BLOCK", "authorization_decision": "DENY"}
 
 
 def test_waits_for_step_up_then_allows(config):

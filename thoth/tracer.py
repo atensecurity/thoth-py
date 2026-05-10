@@ -1,7 +1,7 @@
 # thoth/tracer.py
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 import functools
 import inspect
 import logging
@@ -24,7 +24,7 @@ from thoth.session import SessionContext
 from thoth.step_up import StepUpClient
 
 logger = logging.getLogger(__name__)
-UTC = timezone.utc
+UTC = UTC
 
 
 def _to_jsonable(value: Any, *, depth: int = 0) -> Any:
@@ -105,6 +105,8 @@ def _apply_modified_call_args(
 
 def _decision_context(decision: EnforcementDecision) -> dict[str, Any]:
     return {
+        "decision_envelope_version": decision.decision_envelope_version,
+        "enforcement_trace_id": decision.enforcement_trace_id,
         "decision_reason_code": decision.decision_reason_code,
         "action_classification": decision.action_classification,
         "authorization_decision": decision.authorization_decision or decision.decision.value,
@@ -120,6 +122,10 @@ def _decision_context(decision: EnforcementDecision) -> dict[str, Any]:
         "matched_control_ids": list(decision.matched_control_ids),
         "policy_references": list(decision.policy_references),
         "model_signals": list(decision.model_signals),
+        "fastml_features": dict(decision.fastml_features or {}),
+        "score_components": decision.score_components,
+        "top_contributors": list(decision.top_contributors),
+        "decision_evidence": decision.decision_evidence,
         "receipt": decision.receipt,
     }
 
@@ -151,18 +157,20 @@ def _violation_from_decision(
     *,
     fallback_decision: EnforcementDecision | None = None,
 ) -> ThothPolicyViolation:
-    context = (
-        _merge_decision_context(decision, fallback_decision)
-        if fallback_decision is not None
-        else _decision_context(decision)
-    )
+    context = _merge_decision_context(decision, fallback_decision) if fallback_decision is not None else _decision_context(decision)
     return ThothPolicyViolation(
         tool_name=tool_name,
         reason=reason,
         violation_id=decision.violation_id or (fallback_decision.violation_id if fallback_decision else None),
+        decision_envelope_version=context.get("decision_envelope_version"),
         decision_reason_code=context.get("decision_reason_code"),
         action_classification=context.get("action_classification"),
         authorization_decision=context.get("authorization_decision"),
+        enforcement_trace_id=context.get("enforcement_trace_id"),
+        fastml_features=context.get("fastml_features"),
+        score_components=context.get("score_components"),
+        top_contributors=context.get("top_contributors"),
+        decision_evidence=context.get("decision_evidence"),
         defer_timeout_seconds=context.get("defer_timeout_seconds"),
         step_up_timeout_seconds=context.get("step_up_timeout_seconds"),
         risk_score=context.get("risk_score"),
@@ -181,6 +189,7 @@ def _violation_from_decision(
 
 def _policy_violation_metadata(exc: ThothPolicyViolation) -> dict[str, Any]:
     metadata: dict[str, Any] = {
+        "decision_envelope_version": exc.decision_envelope_version,
         "decision_reason_code": exc.decision_reason_code,
         "action_classification": exc.action_classification,
         "authorization_decision": exc.authorization_decision,
@@ -196,6 +205,11 @@ def _policy_violation_metadata(exc: ThothPolicyViolation) -> dict[str, Any]:
         "matched_control_ids": exc.matched_control_ids,
         "policy_references": exc.policy_references,
         "model_signals": exc.model_signals,
+        "enforcement_trace_id": exc.enforcement_trace_id,
+        "fastml_features": exc.fastml_features,
+        "score_components": exc.score_components,
+        "top_contributors": exc.top_contributors,
+        "decision_evidence": exc.decision_evidence,
         "receipt": exc.receipt,
     }
     return {k: v for k, v in metadata.items() if v is not None}
@@ -445,6 +459,14 @@ class Tracer:
         }
         if tool_args:
             metadata["tool_args"] = _to_jsonable(tool_args)
+        if self._config.purpose:
+            metadata["purpose"] = self._config.purpose
+            metadata["purpose_context"] = self._config.purpose
+        if self._config.data_classification:
+            metadata["data_classification"] = self._config.data_classification
+        if self._config.task_context:
+            metadata["task_context"] = _to_jsonable(self._config.task_context)
+            metadata["delegation_context"] = _to_jsonable(self._config.task_context)
         return metadata
 
     def _emit(
@@ -461,6 +483,14 @@ class Tracer:
             agent_id=self._config.agent_id,
             session_id=self._session.session_id,
             user_id=self._config.user_id,
+            purpose=self._config.purpose,
+            data_classification=self._config.data_classification,
+            task_context=self._config.task_context,
+            initiated_by=(str(self._config.task_context.get("initiated_by") or self._config.task_context.get("initiatedBy") or "").strip() or None),
+            task_id=(str(self._config.task_context.get("task_id") or self._config.task_context.get("taskId") or "").strip() or None),
+            delegation_chain=[
+                str(item).strip() for item in (self._config.task_context.get("chain") if isinstance(self._config.task_context.get("chain"), list) else []) if str(item).strip()
+            ],
             source_type=SourceType.AGENT_TOOL_CALL,
             event_type=event_type,
             tool_name=tool_name,
@@ -484,11 +514,7 @@ class Tracer:
     ) -> None:
         trace_id = self._config.enforcement_trace_id or self._session.session_id
         logger.debug(
-            (
-                "thoth %s decision (%s path) tool=%s decision=%s "
-                "authorization_decision=%s hold_token=%s reason_code=%s "
-                "reason=%s trace_id=%s session_id=%s"
-            ),
+            ("thoth %s decision (%s path) tool=%s decision=%s authorization_decision=%s hold_token=%s reason_code=%s reason=%s trace_id=%s session_id=%s"),
             phase,
             "async" if async_path else "sync",
             tool_name,

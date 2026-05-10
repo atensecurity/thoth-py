@@ -8,12 +8,7 @@ from thoth.models import BehavioralEvent, DecisionType, EnforcementDecision, Enf
 
 
 def load_golden_fixture(name: str) -> dict:
-    fixture_path = (
-        Path(__file__).resolve().parents[5]
-        / "testdata"
-        / "sdk"
-        / "enforcement_decision_golden.json"
-    )
+    fixture_path = Path(__file__).resolve().parents[5] / "testdata" / "sdk" / "enforcement_decision_golden.json"
     payload = json.loads(fixture_path.read_text(encoding="utf-8"))
     return payload[name]
 
@@ -49,7 +44,7 @@ def test_thoth_config_defaults():
         approved_scope=["read:data"],
         tenant_id="trantor",
     )
-    assert config.enforcement == EnforcementMode.PROGRESSIVE
+    assert config.enforcement == EnforcementMode.BLOCK
     with pytest.raises(ValueError, match="Thoth API URL is required"):
         _ = config.resolved_enforcer_url
 
@@ -140,3 +135,21 @@ def test_enforcement_decision_parses_expanded_policy_context_fields():
         "signature": "sig-golden-001",
         "signing_algorithm": "ed25519",
     }
+
+
+def test_enforcement_decision_parses_decision_evidence_fields():
+    decision = EnforcementDecision.model_validate(
+        {
+            "decision": "BLOCK",
+            "enforcementTraceId": "trace-123",
+            "fastmlFeatures": {"scope_match": 0.2, "drift_score": 0.9},
+            "scoreComponents": {"model_score": 91.2},
+            "topContributors": [{"feature": "drift_score", "contribution_points": 40.0}],
+            "decisionEvidence": {"decision": "BLOCK", "authorization_decision": "DENY"},
+        }
+    )
+    assert decision.enforcement_trace_id == "trace-123"
+    assert decision.fastml_features == {"scope_match": 0.2, "drift_score": 0.9}
+    assert decision.score_components == {"model_score": 91.2}
+    assert decision.top_contributors == [{"feature": "drift_score", "contribution_points": 40.0}]
+    assert decision.decision_evidence == {"decision": "BLOCK", "authorization_decision": "DENY"}
