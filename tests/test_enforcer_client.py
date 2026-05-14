@@ -1,6 +1,7 @@
 # tests/test_enforcer_client.py
-import httpx
 import json
+
+import httpx
 import pytest
 import respx
 from thoth.enforcer_client import EnforcerClient

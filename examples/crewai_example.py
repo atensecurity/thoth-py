@@ -2,7 +2,7 @@
 Thoth + CrewAI — getting started example.
 
 Prerequisites:
-    pip install "aten-thoth" crewai
+    pip install "atensec-thoth" crewai
 
 Environment variables:
     THOTH_API_KEY      — your Thoth API key (get one at https://app.atensecurity.com)

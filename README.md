@@ -4,7 +4,7 @@ Thoth SDK instruments your AI agents for governance, policy enforcement, and beh
 Every tool call is evaluated against your organization's security policies in <100ms — blocking,
 stepping up for human approval, or silently observing based on your configured enforcement mode.
 
-**Package name:** `aten-thoth` | **PyPI:** `pip install aten-thoth`
+**Package name:** `atensec-thoth` | **PyPI:** `pip install atensec-thoth`
 
 ---
 
@@ -12,9 +12,10 @@ stepping up for human approval, or silently observing based on your configured e
 
 1. [Installation](#installation)
 2. [Quick Start](#quick-start)
-3. [Legacy Compatibility (`ThothClient`)](#legacy-compatibility-thothclient)
-4. [How It Works](#how-it-works)
-5. [Integration Examples](#integration-examples)
+3. [What's New Since 0.1.15](#whats-new-since-0115)
+4. [Legacy Compatibility (`ThothClient`)](#legacy-compatibility-thothclient)
+5. [How It Works](#how-it-works)
+6. [Integration Examples](#integration-examples)
    - [LangChain AgentExecutor](#langchain-agentexecutor)
    - [LangGraph](#langgraph)
    - [Claude Agent SDK (`query`)](#claude-agent-sdk-query)
@@ -23,44 +24,44 @@ stepping up for human approval, or silently observing based on your configured e
    - [CrewAI](#crewai)
    - [AutoGen](#autogen)
    - [Custom Tools (Generic)](#custom-tools-generic)
-6. [Enforcement Modes](#enforcement-modes)
-7. [Policy Decisions](#policy-decisions)
-8. [Handling Violations](#handling-violations)
-9. [Step-Up Authentication](#step-up-authentication)
-10. [Session Inspection](#session-inspection)
-11. [Configuration Reference](#configuration-reference)
-12. [Dashboard](#dashboard)
+7. [Enforcement Modes](#enforcement-modes)
+8. [Policy Decisions](#policy-decisions)
+9. [Handling Violations](#handling-violations)
+10. [Step-Up Authentication](#step-up-authentication)
+11. [Session Inspection](#session-inspection)
+12. [Configuration Reference](#configuration-reference)
+13. [Dashboard](#dashboard)
 
 ---
 
 ## Installation
 
 ```bash
-pip install aten-thoth
+pip install atensec-thoth
 ```
 
 **With LangChain / LangGraph support:**
 
 ```bash
-pip install "aten-thoth[langchain]"
+pip install "atensec-thoth[langchain]"
 ```
 
 **With OpenAI support:**
 
 ```bash
-pip install "aten-thoth[openai]"
+pip install "atensec-thoth[openai]"
 ```
 
 **With Claude Agent SDK support:**
 
 ```bash
-pip install "aten-thoth[claude]"
+pip install "atensec-thoth[claude]"
 ```
 
 **With AutoGen support:**
 
 ```bash
-pip install "aten-thoth[autogen]"
+pip install "atensec-thoth[autogen]"
 ```
 
 **Requirements:** Python 3.12+
@@ -103,6 +104,28 @@ result = agent.run("Summarize the attached document and send it to the team.")
 
 That's it. No AWS credentials, no infrastructure setup — the SDK sends events and enforcement
 requests over HTTPS to your tenant API URL.
+
+---
+
+## What's New Since 0.1.15
+
+If you're upgrading from `0.1.15`, these are the material integration changes:
+
+- **Package publish target is now `atensec-thoth`** (docs/examples updated accordingly).
+- **Decision model expanded** beyond `ALLOW/BLOCK/STEP_UP`:
+  - `MODIFY`: enforcer can sanitize/transform tool args before execution.
+  - `DEFER`: enforcer can defer execution with retry guidance.
+- **Decision envelope context surfaced end-to-end**:
+  - `decision_reason_code`, `action_classification`, `authorization_decision`
+  - `risk_score`, `latency_ms`, `pack_id`, `pack_version`, `rule_version`
+  - `matched_rule_ids`, `matched_control_ids`, `regulatory_regimes`, `policy_references`, `model_signals`
+  - `fastml_features`, `score_components`, `top_contributors`, `decision_evidence`, `receipt`
+- **Async tool wrappers use async enforcement path** (`acheck`) and preserve sync/async behavior.
+- **Structured tool metadata emission** now includes normalized `tool_call` payload and result summaries.
+- **Enforcer payload now includes richer context** when provided:
+  - `tool_args`, `environment`, `enforcement_trace_id`
+  - `session_intent`, `purpose`, `data_classification`, `task_context`
+- **Release automation moved to tag-driven public workflow** in `atensecurity/thoth-py`, with release notes sourced from `CHANGELOG.md`.
 
 ---
 
@@ -502,16 +525,19 @@ Set via the `enforcement` parameter to `instrument()`.
 
 ## Policy Decisions
 
-The enforcer returns one of three decisions for each tool call:
+The enforcer returns one of five decisions for each tool call:
 
 | Decision | Meaning | Agent behavior |
 |---|---|---|
 | `ALLOW` | Call is within policy. | Tool executes immediately. |
 | `STEP_UP` | Call requires human approval. | SDK polls `/v1/enforce/hold/{token}` until approved or timed out. On timeout → `BLOCK`. |
+| `MODIFY` | Call is allowed with transformed/sanitized arguments. | SDK rewrites the tool call args and then executes the tool. |
+| `DEFER` | Call is postponed pending more context/workflow state. | SDK raises `ThothPolicyViolation` with defer context and timeout guidance. |
 | `BLOCK` | Call violates policy. | `ThothPolicyViolation` is raised before the tool executes. |
 
 Enforcer errors (for example, network timeout or 5xx) fail closed: the SDK treats them as
-`BLOCK` and raises `ThothPolicyViolation`. Errors are logged at `WARNING` level.
+`BLOCK` and raises `ThothPolicyViolation`. Authentication/ingress failures include diagnostic hints
+in logs to speed up misconfiguration debugging.
 
 ---
 
@@ -526,6 +552,12 @@ except ThothPolicyViolation as e:
     # e.tool_name   — the tool that was blocked
     # e.reason      — human-readable policy reason
     # e.violation_id — reference ID for the violation record in Maat dashboard
+    # e.decision_reason_code / e.action_classification / e.authorization_decision
+    # e.risk_score / e.pack_id / e.pack_version / e.rule_version
+    # e.matched_rule_ids / e.matched_control_ids / e.regulatory_regimes
+    # e.policy_references / e.model_signals
+    # e.fastml_features / e.score_components / e.top_contributors / e.decision_evidence
+    # e.enforcement_trace_id / e.receipt
     logger.warning("Policy violation on %s: %s (id=%s)", e.tool_name, e.reason, e.violation_id)
     return {"error": "This action is not permitted under your current access policy."}
 ```
@@ -592,6 +624,12 @@ if session:
 | `event_ingest_token` | `str \| None` | `$THOTH_EVENT_INGEST_TOKEN` | Optional dedicated token sent as `X-Thoth-Event-Ingest-Token` for `/v1/events/batch`. |
 | `api_url` | `str \| None` | `$THOTH_API_URL` | Required tenant API base URL used for both event ingestion and policy checks. |
 | `session_id` | `str \| None` | auto-generated UUID | Pass an existing session ID to continue a session across calls. |
+| `session_intent` | `str \| None` | `None` | Intent label used for minimum-necessary/session-scope policies. |
+| `purpose` | `str \| None` | `None` | Policy context for allowed business purpose. |
+| `data_classification` | `str \| None` | `None` | Policy context for data sensitivity. |
+| `task_context` | `dict[str, Any] \| None` | `{}` | Optional delegation metadata (`initiated_by`, `task_id`, `chain`, etc.). |
+| `environment` | `str \| None` | `$THOTH_ENVIRONMENT` or `"prod"` | Environment selector sent to enforcer policy lookup. |
+| `enforcement_trace_id` | `str \| None` | `session_id` | Correlation ID propagated across enforcement/evidence paths. |
 
 ### `ThothConfig` fields
 
@@ -607,14 +645,22 @@ if session:
 | `api_url` | `str \| None` | `None` | Required tenant API base URL. Provide directly or via `THOTH_API_URL`. Used for both `/v1/enforce` and `/v1/events/batch`. |
 | `step_up_timeout_minutes` | `int` | `15` | Timeout for step-up approval. |
 | `step_up_poll_interval_seconds` | `int` | `5` | Polling interval for step-up hold status. |
+| `session_intent` | `str \| None` | `None` | Session purpose used by intent-scoped compliance packs. |
+| `purpose` | `str \| None` | `None` | Business-purpose label propagated to policy checks and telemetry. |
+| `data_classification` | `str \| None` | `None` | Sensitivity label propagated to policy checks and telemetry. |
+| `task_context` | `dict[str, Any]` | `{}` | Delegation/task metadata included in enforcement payload + events. |
+| `environment` | `str` | `"prod"` | Environment selector included in `/v1/enforce` payload. |
+| `enforcement_trace_id` | `str \| None` | `None` | Optional explicit trace ID; falls back to `session_id`. |
 
 ### Environment Variables
 
 | Variable | Description |
 |---|---|
+| `THOTH_TENANT_ID` | Tenant identifier used by your application to pass `tenant_id` into SDK APIs (the SDK does not auto-read this by itself). |
 | `THOTH_API_KEY` | API key from the Aten dashboard. Enables HTTPS event transport. Example: `thoth_live_abc123...` |
 | `THOTH_EVENT_INGEST_TOKEN` | Optional dedicated telemetry token for `/v1/events/batch` (`X-Thoth-Event-Ingest-Token` header). |
 | `THOTH_API_URL` | Required tenant API base URL for both event ingestion and policy checks. Example: `https://enforce.<tenant>.<apex-domain>` |
+| `THOTH_ENVIRONMENT` | Optional environment selector (`prod`, `staging`, `dev`, etc.) sent to the enforcer payload. |
 | `THOTH_LOG_LEVEL` | Optional SDK logger level override (`DEBUG`, `INFO`, `WARNING`, `ERROR`). If unset, SDK falls back to `LOG_LEVEL` when present. |
 
 Resolution precedence:

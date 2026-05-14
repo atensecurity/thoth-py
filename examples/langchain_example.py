@@ -2,7 +2,7 @@
 Thoth + LangChain AgentExecutor — getting started example.
 
 Prerequisites:
-    pip install "aten-thoth[langchain]" langchain langchain-openai
+    pip install "atensec-thoth[langchain]" langchain langchain-openai
 
 Environment variables:
     THOTH_API_KEY      — your Thoth API key (get one at https://app.atensecurity.com)

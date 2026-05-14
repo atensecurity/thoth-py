@@ -1,5 +1,4 @@
 import httpx
-
 from thoth.http_diagnostics import auth_failure_hint, extract_http_error_detail
 
 

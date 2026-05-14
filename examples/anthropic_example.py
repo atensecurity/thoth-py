@@ -2,7 +2,7 @@
 Thoth + Anthropic Claude — getting started example.
 
 Prerequisites:
-    pip install "aten-thoth" anthropic
+    pip install "atensec-thoth" anthropic
 
 Environment variables:
     THOTH_API_KEY      — your Thoth API key (get one at https://app.atensecurity.com)

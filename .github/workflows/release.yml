@@ -1,0 +1,146 @@
+name: Release atensec-thoth
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g. 0.1.16)"
+        required: true
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    name: Build and release to PyPI
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/atensec-thoth/
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Resolve version from tag or input
+        id: version
+        shell: bash
+        env:
+          TAG_REF: ${{ github.ref_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+
+          if [[ -n "${INPUT_VERSION}" ]]; then
+            VERSION="${INPUT_VERSION#v}"
+            TAG="v${VERSION}"
+          else
+            TAG="${TAG_REF}"
+            VERSION="${TAG_REF#v}"
+          fi
+
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc[0-9]+)?$ ]]; then
+            echo "Invalid version '${VERSION}'. Expected semantic version like 0.1.16 or 0.1.16-rc1." >&2
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate changelog entry exists
+        id: changelog
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          NOTES="$(
+            awk -v version="${VERSION}" '
+              $1 == "##" {
+                if (capture && $2 != version) { exit }
+                if ($2 == version) { capture=1 }
+              }
+              capture {print}
+            ' CHANGELOG.md
+          )"
+
+          if [[ -z "${NOTES//[[:space:]]/}" ]]; then
+            echo "::error::Missing CHANGELOG entry for ${VERSION} in CHANGELOG.md"
+            echo "::error::Expected heading format: ## ${VERSION} - YYYY-MM-DD"
+            exit 1
+          fi
+
+          {
+            echo "notes<<EOF"
+            echo "${NOTES}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade pip build
+
+      - name: Build distribution (sdist + wheel)
+        env:
+          # Enforce release version from the pushed tag for dynamic versioning.
+          POETRY_DYNAMIC_VERSIONING_BYPASS: ${{ steps.version.outputs.version }}
+        run: python -m build
+
+      - name: Publish to PyPI (Trusted Publisher)
+        id: publish_trusted
+        continue-on-error: true
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        with:
+          packages-dir: dist/
+
+      - name: Publish to PyPI (PYPI_TOKEN fallback)
+        id: publish_token
+        if: steps.publish_trusted.outcome != 'success' && secrets.PYPI_TOKEN != ''
+        uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
+        with:
+          packages-dir: dist/
+          user: __token__
+          password: ${{ secrets.PYPI_TOKEN }}
+
+      - name: Fail if PyPI publish did not succeed
+        if: steps.publish_trusted.outcome != 'success' && steps.publish_token.outcome != 'success'
+        run: |
+          echo "::error::PyPI publish failed for atensec-thoth."
+          echo "::error::Trusted Publisher OIDC path failed and PYPI_TOKEN fallback did not succeed."
+          exit 1
+
+      - name: Create or update GitHub release from changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          NOTES: ${{ steps.changelog.outputs.notes }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          printf '%s\n' "${NOTES}" > release_notes.md
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" dist/* --clobber
+            gh release edit "${TAG}" --notes-file release_notes.md
+          else
+            gh release create "${TAG}" \
+              --title "atensec-thoth ${TAG}" \
+              --notes-file release_notes.md \
+              dist/*
+          fi

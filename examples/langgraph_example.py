@@ -6,7 +6,7 @@ Thoth wraps tools at the function level, so it works with any LangGraph
 agent regardless of topology.
 
 Prerequisites:
-    pip install "aten-thoth" langgraph langchain-anthropic
+    pip install "atensec-thoth" langgraph langchain-anthropic
 
 Environment variables:
     THOTH_API_KEY      — your Thoth API key (get one at https://app.atensecurity.com)

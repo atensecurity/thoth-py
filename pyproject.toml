@@ -18,10 +18,10 @@ update = "poetry update --no-interaction"
 [tool.poetry]
 authors = ["Aten Engineering <engineering@atensecurity.com>"]
 description = "AI agent governance SDK by Aten Security"
-name = "aten-thoth"
+name = "atensec-thoth"
 packages = [{include = "thoth"}]
 readme = "README.md"
-version = "0.5.11"
+version = "0.1.16"
 
 [tool.poetry.dependencies]
 anyio = ">=4.0"

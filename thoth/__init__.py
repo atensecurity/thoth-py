@@ -12,7 +12,7 @@ from thoth.instrumentor import (
 )
 
 try:
-    __version__ = version("aten-thoth")
+    __version__ = version("atensec-thoth")
 except PackageNotFoundError:
     __version__ = "0+unknown"
 

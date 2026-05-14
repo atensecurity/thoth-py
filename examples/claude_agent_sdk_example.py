@@ -2,7 +2,7 @@
 Thoth + claude-agent-sdk query() example.
 
 Prerequisites:
-    pip install "aten-thoth[claude]"
+    pip install "atensec-thoth[claude]"
 
 Environment variables:
     THOTH_API_KEY     — your Thoth API key
