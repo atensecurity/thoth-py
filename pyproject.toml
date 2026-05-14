@@ -67,6 +67,12 @@ enable = true
 asyncio_mode = "auto"
 
 [tool.ruff]
+exclude = [
+  "**/tests/**",
+  "**/test_*.py",
+  "**/conftest.py",
+  "examples/"
+]
 target-version = "py312"
 
 [tool.ruff.lint.per-file-ignores]
