@@ -8,7 +8,7 @@ from thoth.models import BehavioralEvent, DecisionType, EnforcementDecision, Enf
 
 
 def load_golden_fixture(name: str) -> dict:
-    fixture_path = Path(__file__).resolve().parents[5] / "testdata" / "sdk" / "enforcement_decision_golden.json"
+    fixture_path = Path(__file__).parent / "fixtures" / "enforcement_decision_golden.json"
     payload = json.loads(fixture_path.read_text(encoding="utf-8"))
     return payload[name]
 

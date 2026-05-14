@@ -1,0 +1,118 @@
+{
+  "block_full_context": {
+    "authorization_decision": "BLOCK",
+    "decision_reason_code": "forbidden_action_static_policy",
+    "action_classification": "write",
+    "reason": "blocked by static policy",
+    "violation_id": "vio-golden-001",
+    "risk_score": 93.7,
+    "latency_ms": 15.4,
+    "pack_id": "security-engineering",
+    "pack_version": "2026.05.01",
+    "rule_version": 7,
+    "regulatory_regimes": [
+      "soc2",
+      "hipaa"
+    ],
+    "matched_rule_ids": [
+      "rule-openclaw-001"
+    ],
+    "matched_control_ids": [
+      "cc6.1",
+      "cc7.2"
+    ],
+    "policy_references": [
+      "SOC2 CC6.1",
+      "SOC2 CC7.2"
+    ],
+    "model_signals": [
+      "moses_action:block",
+      "classification:write"
+    ],
+    "receipt": {
+      "signature": "sig-golden-001",
+      "signing_algorithm": "ed25519"
+    }
+  },
+  "defer_with_timeout": {
+    "authorization_decision": "DEFER",
+    "decision_reason_code": "defer_waiting_for_approval",
+    "action_classification": "read",
+    "defer_reason": "awaiting business owner approval",
+    "defer_timeout_seconds": 45,
+    "violation_id": "vio-golden-defer-001",
+    "risk_score": 61.3,
+    "latency_ms": 11.2,
+    "pack_id": "engineering",
+    "pack_version": "2026.05.01",
+    "rule_version": 3,
+    "matched_rule_ids": [
+      "rule-approval-001"
+    ],
+    "matched_control_ids": [
+      "cc8.1"
+    ],
+    "policy_references": [
+      "SOC2 CC8.1"
+    ],
+    "model_signals": [
+      "moses_action:defer"
+    ]
+  },
+  "modify_with_args": {
+    "authorization_decision": "MODIFY",
+    "decision_reason_code": "minimum_necessary_transform",
+    "action_classification": "read",
+    "modification_reason": "remove sensitive fields",
+    "modified_tool_args": {
+      "path": "/tmp/safe.txt",
+      "redacted": true
+    },
+    "risk_score": 48.0,
+    "latency_ms": 9.1,
+    "pack_id": "hipaa",
+    "pack_version": "2026.05.01",
+    "rule_version": 12,
+    "regulatory_regimes": [
+      "hipaa"
+    ],
+    "matched_rule_ids": [
+      "rule-min-necessary-001"
+    ],
+    "matched_control_ids": [
+      "164.502(b)"
+    ],
+    "policy_references": [
+      "HIPAA 164.502(b)"
+    ],
+    "model_signals": [
+      "classification:phi",
+      "dlp_redactions:2"
+    ]
+  },
+  "step_up_pending": {
+    "authorization_decision": "STEP_UP",
+    "decision_reason_code": "step_up_high_risk",
+    "action_classification": "write",
+    "reason": "step-up approval required",
+    "hold_token": "hold-golden-001",
+    "step_up_timeout_seconds": 900,
+    "risk_score": 86.2,
+    "latency_ms": 13.8,
+    "pack_id": "finance",
+    "pack_version": "2026.05.01",
+    "rule_version": 5,
+    "matched_rule_ids": [
+      "rule-stepup-001"
+    ],
+    "matched_control_ids": [
+      "cc7.1"
+    ],
+    "policy_references": [
+      "SOC2 CC7.1"
+    ],
+    "model_signals": [
+      "moses_action:step_up"
+    ]
+  }
+}
