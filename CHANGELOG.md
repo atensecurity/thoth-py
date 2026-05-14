@@ -2,7 +2,7 @@
 
 All notable changes to `atensec-thoth` are documented in this file.
 
-## 0.1.16 - YYYY-MM-DD
+## 0.1.16 - 2026-05-14
 
 ### Changed
 
