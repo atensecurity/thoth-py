@@ -131,7 +131,8 @@ If you're upgrading from `0.1.15`, these are the material integration changes:
 
 ## Legacy Compatibility (`ThothClient`)
 
-`thoth.instrument()`, `thoth.instrument_anthropic()`, and `thoth.instrument_openai()` are the
+`thoth.instrument()`, `thoth.instrument_toolchain()`, `thoth.toolchain_function_map()`,
+`thoth.instrument_anthropic()`, and `thoth.instrument_openai()` are the
 preferred APIs for new integrations.
 
 `ThothClient` is still exported for backward compatibility with older examples and wrappers:
@@ -445,23 +446,34 @@ See `examples/crewai_example.py` for the full working script.
 
 ### AutoGen
 
-Use `wrap_autogen_tools()` to govern AutoGen's `function_map`:
+Use one-call toolchain instrumentation and let the SDK build AutoGen's
+`function_map` for you:
 
 ```python
 import os
 import autogen
-from thoth.integrations.autogen import wrap_autogen_tools
-from thoth.tracer import Tracer
-# ... build tracer as shown in the LangGraph section above ...
+import thoth
 
-governed = wrap_autogen_tools(
-    {"search_docs": search_docs, "send_email": send_email},
-    tracer=tracer,
+class AutoGenToolchain:
+    def search_docs(self, query: str) -> str:
+        return f"[docs results for '{query}']"
+
+    def send_email(self, to: str, subject: str, body: str) -> str:
+        return f"Email sent to {to}"
+
+governed = thoth.instrument_toolchain(
+    AutoGenToolchain(),
+    agent_id="autogen-assistant",
+    approved_scope=["search_docs", "send_email"],
+    tenant_id=os.environ["THOTH_TENANT_ID"],
+    enforcement="block",
 )
+
+function_map = thoth.toolchain_function_map(governed)
 
 user_proxy = autogen.UserProxyAgent(
     name="user_proxy",
-    function_map=governed,   # Thoth enforcement runs on every function call
+    function_map=function_map,  # built automatically from governed toolchain
 )
 ```
 
@@ -506,6 +518,42 @@ except ThothPolicyViolation as e:
     print(f"Blocked: {e.tool_name} — {e.reason}")
     if e.violation_id:
         print(f"Violation record: {e.violation_id}")
+```
+
+For nested toolchains (dicts + helper classes), use a single call to recursively instrument public
+methods and nested callables:
+
+```python
+import thoth
+
+class DataSources:
+    def cloudtrail(self, args: dict) -> list[dict]:
+        return self._fetch_cloudtrail(args["signal_id"])
+
+    def _fetch_cloudtrail(self, signal_id: str) -> list[dict]:
+        return [{"signal_id": signal_id}]
+
+toolchain = {
+    "data_sources": DataSources(),
+    "archive_signal": lambda args: True,
+}
+
+governed = thoth.instrument_toolchain(
+    toolchain,
+    agent_id="alert-triage-agent",
+    approved_scope=["data_sources.cloudtrail", "archive_signal"],
+    tenant_id="acme-corp",
+    enforcement="observe",
+)
+
+events = governed["data_sources"].cloudtrail({"signal_id": "sig-123"})
+```
+
+For runtimes that still require a function-map boundary (for example AutoGen),
+generate it from the governed toolchain automatically:
+
+```python
+function_map = thoth.toolchain_function_map(governed)
 ```
 
 ---
@@ -616,7 +664,7 @@ if session:
 |---|---|---|---|
 | `agent` | `Any` | — | Agent object to instrument. Must have a `.tools` list. |
 | `agent_id` | `str` | — | Stable identifier for this agent definition. Used in policy rules. |
-| `approved_scope` | `list[str]` | — | List of tool names this agent is authorized to call. |
+| `approved_scope` | `list[str]` | — | Authorization allow-list of tool names this agent may execute. |
 | `tenant_id` | `str` | — | Your Maat tenant ID. |
 | `user_id` | `str` | `"system"` | Identity of the user on whose behalf the agent acts. |
 | `enforcement` | `str` | `"block"` | Enforcement mode: `observe`, `step_up`, `block`, or `progressive`. |
@@ -630,6 +678,19 @@ if session:
 | `task_context` | `dict[str, Any] \| None` | `{}` | Optional delegation metadata (`initiated_by`, `task_id`, `chain`, etc.). |
 | `environment` | `str \| None` | `$THOTH_ENVIRONMENT` or `"prod"` | Environment selector sent to enforcer policy lookup. |
 | `enforcement_trace_id` | `str \| None` | `session_id` | Correlation ID propagated across enforcement/evidence paths. |
+
+`approved_scope` clarifier:
+- This field is an allow-list, not a natural-language description field.
+- Entries must match emitted tool names exactly (for example `search_docs` or `data_sources.cloudtrail`).
+- Tool meaning/context should be expressed through your tool schemas/prompts and policy context fields
+  (`session_intent`, `purpose`, `data_classification`, `task_context`), which are sent to the enforcer.
+
+`instrument_toolchain()` uses the same governance parameters plus:
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `include_private` | `bool` | `False` | Also wraps private members (names starting with `_`) when set to `True`. |
+| `max_depth` | `int \| None` | `None` | Optional recursion limit for nested dict/list/object toolchains. `None` auto-traverses the full reachable graph. |
 
 ### `ThothConfig` fields
 

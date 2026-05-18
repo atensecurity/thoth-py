@@ -14,63 +14,39 @@ import os
 
 import autogen
 
-from thoth.emitter import HttpEmitter
-from thoth.enforcer_client import EnforcerClient
-from thoth.integrations.autogen import wrap_autogen_tools
-from thoth.models import EnforcementMode, ThothConfig
-from thoth.session import SessionContext
-from thoth.step_up import StepUpClient
-from thoth.tracer import Tracer
+import thoth
 
 # ---------------------------------------------------------------------------
 # 1. Define your tool functions
 # ---------------------------------------------------------------------------
 
 
-def search_docs(query: str) -> str:
-    """Search internal documentation."""
-    return f"[docs results for '{query}']"
+class AutoGenToolchain:
+    """Single root object for all tool implementations."""
 
+    def search_docs(self, query: str) -> str:
+        return f"[docs results for '{query}']"
 
-def send_email(to: str, subject: str, body: str) -> str:
-    """Send an email."""
-    return f"Email sent to {to}"
+    def send_email(self, to: str, subject: str, body: str) -> str:
+        return f"Email sent to {to}"
 
-
-def delete_record(record_id: str) -> str:
-    """Delete a record from the database."""
-    return f"Record {record_id} deleted"
+    def delete_record(self, record_id: str) -> str:
+        return f"Record {record_id} deleted"
 
 
 # ---------------------------------------------------------------------------
-# 2. Build Thoth tracer and wrap the function map
+# 2. Instrument the full toolchain with one SDK call
 # ---------------------------------------------------------------------------
 
-api_key = os.environ["THOTH_API_KEY"]
-tenant_id = os.environ["THOTH_TENANT_ID"]
-
-config = ThothConfig(
+governed = thoth.instrument_toolchain(
+    AutoGenToolchain(),
     agent_id="autogen-assistant",
     approved_scope=["search_docs", "send_email"],  # delete_record NOT in scope → blocked
-    tenant_id=tenant_id,
+    tenant_id=os.environ["THOTH_TENANT_ID"],
     user_id="alice@acme.com",
-    enforcement=EnforcementMode.BLOCK,
-    api_key=api_key,
+    enforcement="block",
 )
-
-session = SessionContext(config)
-tracer = Tracer(
-    config=config,
-    session=session,
-    emitter=HttpEmitter(api_url=config.api_url, api_key=api_key),
-    enforcer=EnforcerClient(config),
-    step_up=StepUpClient(config),
-)
-
-governed = wrap_autogen_tools(
-    {"search_docs": search_docs, "send_email": send_email, "delete_record": delete_record},
-    tracer=tracer,
-)
+function_map = thoth.toolchain_function_map(governed)
 
 # ---------------------------------------------------------------------------
 # 3. Wire governed tools into AutoGen
@@ -121,7 +97,7 @@ assistant = autogen.AssistantAgent(
 user_proxy = autogen.UserProxyAgent(
     name="user_proxy",
     human_input_mode="NEVER",
-    function_map=governed,  # governed functions — Thoth enforcement runs here
+    function_map=function_map,  # governed functions — Thoth enforcement runs here
 )
 
 # ---------------------------------------------------------------------------

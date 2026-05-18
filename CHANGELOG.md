@@ -2,6 +2,22 @@
 
 All notable changes to `atensec-thoth` are documented in this file.
 
+## 0.1.17 - 2026-05-18
+
+### Added
+
+- Added `instrument_toolchain()` for one-call recursive instrumentation of nested toolchains
+  (dict/list/object graphs).
+- Added `toolchain_function_map()` to derive framework function maps (for example AutoGen)
+  directly from governed toolchain objects.
+
+### Changed
+
+- Updated `instrument_anthropic()` and `instrument_openai()` to wrap nested callables by
+  dotted path names.
+- `instrument_toolchain()` traversal is now automatic by default (`max_depth=None`) with cycle
+  protection; callers can still pass an explicit depth cap if needed.
+
 ## 0.1.16 - 2026-05-14
 
 ### Changed

@@ -21,29 +21,43 @@ import thoth
 from thoth import ThothPolicyViolation
 
 # ---------------------------------------------------------------------------
-# 1. Define your tools
+# 1. Define your toolchain
 # ---------------------------------------------------------------------------
 
 
-@tool
-def web_search(query: str) -> str:
-    """Search the web for current information."""
-    return f"[web results for '{query}']"
+class LangChainToolchain:
+    """Single root object for all tool implementations."""
+
+    def web_search(self, query: str) -> str:
+        """Search the web for current information."""
+        return f"[web results for '{query}']"
+
+    def read_file(self, path: str) -> str:
+        """Read a file from the local filesystem."""
+        with open(path) as f:
+            return f.read()
+
+    def write_file(self, path: str, content: str) -> str:
+        """Write content to a file."""
+        with open(path, "w") as f:
+            f.write(content)
+        return f"Written to {path}"
 
 
-@tool
-def read_file(path: str) -> str:
-    """Read a file from the local filesystem."""
-    with open(path) as f:
-        return f.read()
+governed = thoth.instrument_toolchain(
+    LangChainToolchain(),
+    agent_id="langchain-research-agent",
+    approved_scope=["web_search", "read_file"],  # write_file NOT in scope → blocked
+    tenant_id=os.environ["THOTH_TENANT_ID"],
+    user_id="alice@acme.com",
+    enforcement="block",
+)
 
-
-@tool
-def write_file(path: str, content: str) -> str:
-    """Write content to a file."""
-    with open(path, "w") as f:
-        f.write(content)
-    return f"Written to {path}"
+tools = [
+    tool("web_search")(governed.web_search),
+    tool("read_file")(governed.read_file),
+    tool("write_file")(governed.write_file),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -51,7 +65,6 @@ def write_file(path: str, content: str) -> str:
 # ---------------------------------------------------------------------------
 
 llm = ChatOpenAI(model="gpt-4o", temperature=0)
-tools = [web_search, read_file, write_file]
 
 prompt = ChatPromptTemplate.from_messages(
     [
@@ -65,22 +78,7 @@ agent = create_openai_tools_agent(llm, tools, prompt)
 executor = AgentExecutor(agent=agent, tools=tools, verbose=True)
 
 # ---------------------------------------------------------------------------
-# 3. Instrument with Thoth — one call wraps all tools automatically
-#    THOTH_API_KEY is read from the environment automatically.
-# ---------------------------------------------------------------------------
-
-executor = thoth.instrument(
-    executor,
-    agent_id="langchain-research-agent",
-    approved_scope=["web_search", "read_file"],  # write_file NOT in scope → blocked
-    tenant_id=os.environ["THOTH_TENANT_ID"],
-    user_id="alice@acme.com",
-    enforcement="block",
-    # api_key=os.environ["THOTH_API_KEY"],  # explicit override; env var is used by default
-)
-
-# ---------------------------------------------------------------------------
-# 4. Run the agent — Thoth governs every tool call transparently
+# 3. Run the agent — Thoth governs every tool call transparently
 # ---------------------------------------------------------------------------
 
 try:

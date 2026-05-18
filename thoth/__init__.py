@@ -9,6 +9,8 @@ from thoth.instrumentor import (
     instrument_anthropic,
     instrument_claude_agent_sdk,
     instrument_openai,
+    instrument_toolchain,
+    toolchain_function_map,
 )
 
 try:
@@ -25,4 +27,6 @@ __all__ = [
     "instrument_anthropic",
     "instrument_claude_agent_sdk",
     "instrument_openai",
+    "instrument_toolchain",
+    "toolchain_function_map",
 ]

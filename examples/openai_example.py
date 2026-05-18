@@ -19,7 +19,7 @@ import thoth
 from thoth import ThothPolicyViolation
 
 # ---------------------------------------------------------------------------
-# 1. Define your tool schemas (for OpenAI) and implementations (for you)
+# 1. Define your tool schemas (for OpenAI) and a toolchain object (for you)
 # ---------------------------------------------------------------------------
 
 TOOLS = [
@@ -54,23 +54,24 @@ TOOLS = [
 ]
 
 
-def search_docs(query: str) -> str:
-    """Your real implementation."""
-    return f"[search results for '{query}']"
+class SupportToolchain:
+    """Single root object for all tool implementations."""
 
+    def search_docs(self, query: str) -> str:
+        return f"[search results for '{query}']"
 
-def send_email(to: str, subject: str, body: str) -> str:
-    """Your real implementation."""
-    return f"Email sent to {to}"
+    def send_email(self, to: str, subject: str, body: str) -> str:
+        return f"Email sent to {to}"
 
 
 # ---------------------------------------------------------------------------
-# 2. Instrument tool functions with Thoth
+# 2. Instrument the full toolchain with one SDK call
 #    THOTH_API_KEY is read from the environment automatically.
 # ---------------------------------------------------------------------------
 
-governed = thoth.instrument_openai(
-    {"search_docs": search_docs, "send_email": send_email},
+toolchain = SupportToolchain()
+governed = thoth.instrument_toolchain(
+    toolchain,
     agent_id="openai-support-bot",
     approved_scope=["search_docs"],  # send_email is NOT in scope → will be blocked
     tenant_id=os.environ["THOTH_TENANT_ID"],
@@ -100,7 +101,7 @@ while True:
         break
 
     for call in msg.tool_calls:
-        fn = governed.get(call.function.name)
+        fn = getattr(governed, call.function.name, None)
         if not fn:
             continue
         args = json.loads(call.function.arguments)

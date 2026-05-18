@@ -7,6 +7,8 @@ from thoth.instrumentor import (
     instrument_anthropic,
     instrument_claude_agent_sdk,
     instrument_openai,
+    instrument_toolchain,
+    toolchain_function_map,
 )
 
 
@@ -31,6 +33,14 @@ class ThothClient:
     def instrument_claude_agent_sdk(self, options: Any | None = None, **kwargs: Any) -> Any:
         return instrument_claude_agent_sdk(options, **self._merged(kwargs))
 
+    def instrument_toolchain(self, toolchain: Any, **kwargs: Any) -> Any:
+        return instrument_toolchain(toolchain, **self._merged(kwargs))
+
+    def toolchain_function_map(self, toolchain: Any, **kwargs: Any) -> dict[str, Any]:
+        merged = self._merged(kwargs)
+        supported = {key: merged[key] for key in ("include_private", "max_depth") if key in merged}
+        return cast(dict[str, Any], toolchain_function_map(toolchain, **supported))
+
     # Legacy aliases kept for backwards compatibility.
     def wrap(self, agent: Any, **kwargs: Any) -> Any:
         return self.instrument(agent, **kwargs)
@@ -43,6 +53,12 @@ class ThothClient:
 
     def wrap_claude_agent_sdk(self, options: Any | None = None, **kwargs: Any) -> Any:
         return self.instrument_claude_agent_sdk(options, **kwargs)
+
+    def wrap_toolchain(self, toolchain: Any, **kwargs: Any) -> Any:
+        return self.instrument_toolchain(toolchain, **kwargs)
+
+    def build_function_map(self, toolchain: Any, **kwargs: Any) -> dict[str, Any]:
+        return self.toolchain_function_map(toolchain, **kwargs)
 
     def _merged(self, kwargs: dict[str, Any]) -> dict[str, Any]:
         merged = dict(self._defaults)

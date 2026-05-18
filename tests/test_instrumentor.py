@@ -1,5 +1,5 @@
 # tests/test_instrumentor.py
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import thoth
@@ -17,6 +17,17 @@ class FakeTool:
 class FakeAgent:
     def __init__(self, tools):
         self.tools = tools
+
+
+class NestedToolchain:
+    def fetch(self, payload):
+        return self.parse(payload)
+
+    def parse(self, payload):
+        return payload.get("id")
+
+    def _hidden(self, payload):
+        return payload.get("id")
 
 
 def test_instrument_returns_agent():
@@ -123,3 +134,102 @@ def test_instrument_uses_event_ingest_token_env_var(monkeypatch: pytest.MonkeyPa
     assert mock_emitter.call_count == 1
     call = mock_emitter.call_args
     assert call.kwargs["event_ingest_token"] == "ingest-token-123"
+
+
+def test_instrument_toolchain_wraps_nested_methods():
+    toolchain = {"datadog": NestedToolchain()}
+    with patch("thoth.instrumentor.EnforcerClient"), patch("thoth.instrumentor.HttpEmitter"):
+        governed = thoth.instrument_toolchain(
+            toolchain,
+            agent_id="my-agent",
+            approved_scope=["datadog.fetch", "datadog.parse"],
+            tenant_id="trantor",
+            enforcement="observe",
+            api_url="https://enforcer.example",
+        )
+
+    assert governed is toolchain
+    result = governed["datadog"].fetch({"id": "sig-1"})
+    assert result == "sig-1"
+    session = thoth.get_current_session()
+    assert session is not None
+    assert "datadog.fetch" in session.tool_calls
+    assert "datadog.parse" in session.tool_calls
+
+
+def test_instrument_anthropic_wraps_nested_tool_dict():
+    tool_fns = {
+        "data_sources": {
+            "cloudtrail": lambda payload: payload.get("signal_id"),
+        }
+    }
+    with patch("thoth.instrumentor.EnforcerClient"), patch("thoth.instrumentor.HttpEmitter"):
+        governed = thoth.instrument_anthropic(
+            tool_fns,
+            agent_id="my-agent",
+            approved_scope=["data_sources.cloudtrail"],
+            tenant_id="trantor",
+            enforcement="observe",
+            api_url="https://enforcer.example",
+        )
+
+    assert isinstance(governed["data_sources"], dict)
+    result = governed["data_sources"]["cloudtrail"]({"signal_id": "sig-1"})
+    assert result == "sig-1"
+    session = thoth.get_current_session()
+    assert session is not None
+    assert "data_sources.cloudtrail" in session.tool_calls
+
+
+def test_instrument_anthropic_auto_depth_wraps_deep_nested_tool():
+    tool_fns: dict[str, object] = {}
+    cursor: dict[str, object] = tool_fns
+    path_parts = [f"level{i}" for i in range(12)]
+    for part in path_parts:
+        child: dict[str, object] = {}
+        cursor[part] = child
+        cursor = child
+    cursor["cloudtrail"] = lambda payload: payload.get("signal_id")
+
+    tool_name = ".".join(path_parts + ["cloudtrail"])
+    with patch("thoth.instrumentor.EnforcerClient"), patch("thoth.instrumentor.HttpEmitter"):
+        governed = thoth.instrument_anthropic(
+            tool_fns,
+            agent_id="my-agent",
+            approved_scope=[tool_name],
+            tenant_id="trantor",
+            enforcement="observe",
+            api_url="https://enforcer.example",
+        )
+
+    node = governed
+    for part in path_parts:
+        node = node[part]
+    result = node["cloudtrail"]({"signal_id": "sig-1"})
+    assert result == "sig-1"
+    session = thoth.get_current_session()
+    assert session is not None
+    assert tool_name in session.tool_calls
+
+
+def test_toolchain_function_map_collects_public_callables():
+    toolchain = {"datadog": NestedToolchain()}
+    function_map = thoth.toolchain_function_map(toolchain)
+
+    assert "datadog.fetch" in function_map
+    assert "datadog.parse" in function_map
+    assert "datadog._hidden" not in function_map
+    assert callable(function_map["datadog.fetch"])
+
+
+def test_toolchain_function_map_includes_private_when_enabled():
+    toolchain = {"datadog": NestedToolchain()}
+    function_map = thoth.toolchain_function_map(toolchain, include_private=True)
+
+    assert "datadog._hidden" in function_map
+
+
+def test_toolchain_function_map_respects_max_depth():
+    tool_fns = {"level1": {"level2": {"cloudtrail": lambda payload: payload.get("signal_id")}}}
+    function_map = thoth.toolchain_function_map(tool_fns, max_depth=1)
+    assert "level1.level2.cloudtrail" not in function_map

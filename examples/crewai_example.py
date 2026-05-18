@@ -19,26 +19,38 @@ import thoth
 from thoth import ThothPolicyViolation
 
 # ---------------------------------------------------------------------------
-# 1. Define your tools
+# 1. Define your toolchain
 # ---------------------------------------------------------------------------
 
 
-@tool("web_search")
-def web_search(query: str) -> str:
-    """Search the web for current information."""
-    return f"[web results for '{query}']"
+class CrewAIToolchain:
+    """Single root object for all tool implementations."""
+
+    def web_search(self, query: str) -> str:
+        """Search the web for current information."""
+        return f"[web results for '{query}']"
+
+    def send_report(self, recipient: str, content: str) -> str:
+        """Email a report to a recipient."""
+        return f"Report sent to {recipient}"
+
+    def write_to_database(self, table: str, data: str) -> str:
+        """Insert data into a database table."""
+        return f"Written to {table}"
 
 
-@tool("send_report")
-def send_report(recipient: str, content: str) -> str:
-    """Email a report to a recipient."""
-    return f"Report sent to {recipient}"
+governed = thoth.instrument_toolchain(
+    CrewAIToolchain(),
+    agent_id="crewai-toolchain",
+    approved_scope=["web_search", "send_report"],  # write_to_database NOT in scope → blocked
+    tenant_id=os.environ["THOTH_TENANT_ID"],
+    user_id="alice@acme.com",
+    enforcement="block",
+)
 
-
-@tool("write_to_database")
-def write_to_database(table: str, data: str) -> str:
-    """Insert data into a database table."""
-    return f"Written to {table}"
+web_search_tool = tool("web_search")(governed.web_search)
+send_report_tool = tool("send_report")(governed.send_report)
+write_to_database_tool = tool("write_to_database")(governed.write_to_database)
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +61,7 @@ researcher = Agent(
     role="Researcher",
     goal="Find accurate, up-to-date information on assigned topics",
     backstory="You are a detail-oriented research analyst.",
-    tools=[web_search],
+    tools=[web_search_tool],
     verbose=True,
 )
 
@@ -57,37 +69,12 @@ reporter = Agent(
     role="Report Writer",
     goal="Summarize research findings and distribute them",
     backstory="You are a concise technical writer.",
-    tools=[send_report, write_to_database],
+    tools=[send_report_tool, write_to_database_tool],
     verbose=True,
 )
 
 # ---------------------------------------------------------------------------
-# 3. Instrument each agent with Thoth
-#    thoth.instrument() detects CrewAI agents automatically.
-#    THOTH_API_KEY is read from the environment automatically.
-# ---------------------------------------------------------------------------
-
-thoth.instrument(
-    researcher,
-    agent_id="crewai-researcher",
-    approved_scope=["web_search"],
-    tenant_id=os.environ["THOTH_TENANT_ID"],
-    user_id="alice@acme.com",
-    enforcement="block",
-    # api_key=os.environ["THOTH_API_KEY"],  # explicit override; env var is used by default
-)
-
-thoth.instrument(
-    reporter,
-    agent_id="crewai-reporter",
-    approved_scope=["send_report"],  # write_to_database NOT in scope → blocked
-    tenant_id=os.environ["THOTH_TENANT_ID"],
-    user_id="alice@acme.com",
-    enforcement="block",
-)
-
-# ---------------------------------------------------------------------------
-# 4. Define tasks and run the crew
+# 3. Define tasks and run the crew
 # ---------------------------------------------------------------------------
 
 research_task = Task(

@@ -18,7 +18,7 @@ import thoth
 from thoth import ThothPolicyViolation
 
 # ---------------------------------------------------------------------------
-# 1. Define tool schemas (for Claude) and implementations (for you)
+# 1. Define tool schemas (for Claude) and a toolchain object (for you)
 # ---------------------------------------------------------------------------
 
 TOOLS = [
@@ -43,23 +43,24 @@ TOOLS = [
 ]
 
 
-def search_docs(query: str) -> str:
-    """Your real implementation."""
-    return f"[search results for '{query}']"
+class ResearchToolchain:
+    """Single root object for all tool implementations."""
 
+    def search_docs(self, query: str) -> str:
+        return f"[search results for '{query}']"
 
-def delete_record(record_id: str) -> str:
-    """Your real implementation."""
-    return f"Record {record_id} deleted"
+    def delete_record(self, record_id: str) -> str:
+        return f"Record {record_id} deleted"
 
 
 # ---------------------------------------------------------------------------
-# 2. Instrument with Thoth
+# 2. Instrument the full toolchain with one SDK call
 #    THOTH_API_KEY is read from the environment automatically.
 # ---------------------------------------------------------------------------
 
-governed = thoth.instrument_anthropic(
-    {"search_docs": search_docs, "delete_record": delete_record},
+toolchain = ResearchToolchain()
+governed = thoth.instrument_toolchain(
+    toolchain,
     agent_id="claude-research-agent",
     approved_scope=["search_docs"],  # delete_record NOT in scope → step-up or block
     tenant_id=os.environ["THOTH_TENANT_ID"],
@@ -93,11 +94,11 @@ while True:
     for block in response.content:
         if block.type != "tool_use":
             continue
-        fn = governed.get(block.name)
+        fn = getattr(governed, block.name, None)
         if not fn:
             continue
         try:
-            result = fn(block.input)  # Thoth enforcement runs here
+            result = fn(**block.input)  # Thoth enforcement runs here
         except ThothPolicyViolation as e:
             result = f"[blocked by policy: {e.reason}]"
             print(f"⚠ Policy violation on '{e.tool_name}': {e.reason}")

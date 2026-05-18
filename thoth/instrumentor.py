@@ -1,6 +1,7 @@
 # thoth/instrumentor.py
 from __future__ import annotations
 
+import inspect
 import os
 from typing import Any, cast
 
@@ -12,6 +13,205 @@ from thoth.models import EnforcementMode, ThothConfig
 from thoth.session import SessionContext
 from thoth.step_up import StepUpClient
 from thoth.tracer import Tracer
+
+
+def _join_tool_path(prefix: str, leaf: str) -> str:
+    leaf = leaf.strip()
+    if not prefix:
+        return leaf
+    if not leaf:
+        return prefix
+    return f"{prefix}.{leaf}"
+
+
+def _should_include_attr(attr_name: str, *, include_private: bool) -> bool:
+    if attr_name.startswith("__"):
+        return False
+    if not include_private and attr_name.startswith("_"):
+        return False
+    return True
+
+
+def _instrument_toolchain_node(
+    node: Any,
+    tracer: Tracer,
+    *,
+    path: str,
+    include_private: bool,
+    max_depth: int | None,
+    seen: set[int],
+) -> Any:
+    if callable(node) and not isinstance(node, type):
+        tool_name = path or getattr(node, "__name__", "tool")
+        return tracer.wrap_tool(tool_name, node)
+
+    if max_depth is not None and max_depth <= 0:
+        return node
+    next_depth = None if max_depth is None else max_depth - 1
+
+    node_id = id(node)
+    if node_id in seen:
+        return node
+
+    if isinstance(node, dict):
+        seen.add(node_id)
+        for key, value in list(node.items()):
+            child_path = _join_tool_path(path, str(key))
+            node[key] = _instrument_toolchain_node(
+                value,
+                tracer,
+                path=child_path,
+                include_private=include_private,
+                max_depth=next_depth,
+                seen=seen,
+            )
+        return node
+
+    if isinstance(node, list):
+        seen.add(node_id)
+        for idx, value in enumerate(node):
+            child_path = _join_tool_path(path, str(idx))
+            node[idx] = _instrument_toolchain_node(
+                value,
+                tracer,
+                path=child_path,
+                include_private=include_private,
+                max_depth=next_depth,
+                seen=seen,
+            )
+        return node
+
+    if not hasattr(node, "__dict__"):
+        return node
+
+    seen.add(node_id)
+    wrapped_methods: set[str] = set()
+    for attr_name, class_attr in inspect.getmembers(type(node)):
+        if not _should_include_attr(attr_name, include_private=include_private):
+            continue
+        if not inspect.isroutine(class_attr):
+            continue
+        try:
+            bound_attr = getattr(node, attr_name)
+        except Exception:
+            continue
+        if not callable(bound_attr):
+            continue
+        tool_name = _join_tool_path(path, attr_name)
+        wrapped = tracer.wrap_tool(tool_name, bound_attr)
+        try:
+            setattr(node, attr_name, wrapped)
+            wrapped_methods.add(attr_name)
+        except Exception:
+            continue
+
+    for attr_name, attr_value in list(vars(node).items()):
+        if attr_name in wrapped_methods:
+            continue
+        if not _should_include_attr(attr_name, include_private=include_private):
+            continue
+        child_path = _join_tool_path(path, attr_name)
+        wrapped_value = _instrument_toolchain_node(
+            attr_value,
+            tracer,
+            path=child_path,
+            include_private=include_private,
+            max_depth=next_depth,
+            seen=seen,
+        )
+        if wrapped_value is attr_value:
+            continue
+        try:
+            setattr(node, attr_name, wrapped_value)
+        except Exception:
+            continue
+    return node
+
+
+def _collect_toolchain_callables(
+    node: Any,
+    *,
+    path: str,
+    include_private: bool,
+    max_depth: int | None,
+    seen: set[int],
+    out: dict[str, Any],
+) -> None:
+    if callable(node) and not isinstance(node, type):
+        if path:
+            out[path] = node
+        return
+
+    if max_depth is not None and max_depth <= 0:
+        return
+    next_depth = None if max_depth is None else max_depth - 1
+
+    node_id = id(node)
+    if node_id in seen:
+        return
+
+    if isinstance(node, dict):
+        seen.add(node_id)
+        for key, value in list(node.items()):
+            child_path = _join_tool_path(path, str(key))
+            _collect_toolchain_callables(
+                value,
+                path=child_path,
+                include_private=include_private,
+                max_depth=next_depth,
+                seen=seen,
+                out=out,
+            )
+        return
+
+    if isinstance(node, list):
+        seen.add(node_id)
+        for idx, value in enumerate(node):
+            child_path = _join_tool_path(path, str(idx))
+            _collect_toolchain_callables(
+                value,
+                path=child_path,
+                include_private=include_private,
+                max_depth=next_depth,
+                seen=seen,
+                out=out,
+            )
+        return
+
+    if not hasattr(node, "__dict__"):
+        return
+
+    seen.add(node_id)
+    routine_attrs: set[str] = set()
+    for attr_name, class_attr in inspect.getmembers(type(node)):
+        if not _should_include_attr(attr_name, include_private=include_private):
+            continue
+        if not inspect.isroutine(class_attr):
+            continue
+        try:
+            bound_attr = getattr(node, attr_name)
+        except Exception:
+            continue
+        if not callable(bound_attr):
+            continue
+        tool_name = _join_tool_path(path, attr_name)
+        out[tool_name] = bound_attr
+        routine_attrs.add(attr_name)
+
+    for attr_name, attr_value in list(vars(node).items()):
+        if attr_name in routine_attrs:
+            continue
+        if not _should_include_attr(attr_name, include_private=include_private):
+            continue
+        child_path = _join_tool_path(path, attr_name)
+        _collect_toolchain_callables(
+            attr_value,
+            path=child_path,
+            include_private=include_private,
+            max_depth=next_depth,
+            seen=seen,
+            out=out,
+        )
 
 
 def _build_components(
@@ -161,8 +361,6 @@ def instrument_anthropic(
     Returns:
         Dict of governance-wrapped callables keyed by tool name.
     """
-    from thoth.integrations.anthropic import wrap_anthropic_tools
-
     _, _, _, _, _, tracer = _build_components(
         agent_id,
         approved_scope,
@@ -180,7 +378,17 @@ def instrument_anthropic(
         enforcement_trace_id,
         event_ingest_token,
     )
-    return cast(dict[str, Any], wrap_anthropic_tools(tool_fns, tracer))
+    # Keep top-level copy semantics from previous SDK behavior.
+    copied = dict(tool_fns)
+    wrapped = _instrument_toolchain_node(
+        copied,
+        tracer,
+        path="",
+        include_private=False,
+        max_depth=None,
+        seen=set(),
+    )
+    return cast(dict[str, Any], wrapped)
 
 
 def instrument_openai(
@@ -226,8 +434,6 @@ def instrument_openai(
     Returns:
         Dict of governance-wrapped callables keyed by tool name.
     """
-    from thoth.integrations.openai import wrap_openai_tools
-
     _, _, _, _, _, tracer = _build_components(
         agent_id,
         approved_scope,
@@ -245,7 +451,96 @@ def instrument_openai(
         enforcement_trace_id,
         event_ingest_token,
     )
-    return cast(dict[str, Any], wrap_openai_tools(tool_fns, tracer))
+    # Keep top-level copy semantics from previous SDK behavior.
+    copied = dict(tool_fns)
+    wrapped = _instrument_toolchain_node(
+        copied,
+        tracer,
+        path="",
+        include_private=False,
+        max_depth=None,
+        seen=set(),
+    )
+    return cast(dict[str, Any], wrapped)
+
+
+def instrument_toolchain(
+    toolchain: Any,
+    *,
+    agent_id: str,
+    approved_scope: list[str],
+    tenant_id: str,
+    user_id: str = "system",
+    enforcement: str = "block",
+    api_key: str | None = None,
+    api_url: str | None = None,
+    session_id: str | None = None,
+    session_intent: str | None = None,
+    purpose: str | None = None,
+    data_classification: str | None = None,
+    task_context: dict[str, Any] | None = None,
+    environment: str | None = None,
+    enforcement_trace_id: str | None = None,
+    event_ingest_token: str | None = None,
+    include_private: bool = False,
+    max_depth: int | None = None,
+) -> Any:
+    """Instrument nested toolchain callables from a single entry point.
+
+    ``toolchain`` can be a dict/list/object graph. Public callables discovered
+    recursively are wrapped with governance hooks and named by their dotted path
+    (for example ``data_sources.aws.cloudtrail`` or ``tools.fetch_events``).
+    When ``max_depth`` is ``None`` (default), traversal continues until the
+    reachable graph is exhausted (cycles are skipped).
+    """
+    _, _, _, _, _, tracer = _build_components(
+        agent_id,
+        approved_scope,
+        tenant_id,
+        user_id,
+        enforcement,
+        api_key,
+        api_url,
+        session_id,
+        session_intent,
+        purpose,
+        data_classification,
+        task_context,
+        environment,
+        enforcement_trace_id,
+        event_ingest_token,
+    )
+    return _instrument_toolchain_node(
+        toolchain,
+        tracer,
+        path="",
+        include_private=include_private,
+        max_depth=max_depth,
+        seen=set(),
+    )
+
+
+def toolchain_function_map(
+    toolchain: Any,
+    *,
+    include_private: bool = False,
+    max_depth: int | None = None,
+) -> dict[str, Any]:
+    """Build a function map from a toolchain object for frameworks like AutoGen.
+
+    Names are derived from dotted traversal paths (for example
+    ``search_docs`` or ``data_sources.cloudtrail``).
+    """
+    mapped: dict[str, Any] = {}
+    _collect_toolchain_callables(
+        toolchain,
+        path="",
+        include_private=include_private,
+        max_depth=max_depth,
+        seen=set(),
+        out=mapped,
+    )
+    return mapped
 
 
 def instrument_claude_agent_sdk(

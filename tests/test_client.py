@@ -74,3 +74,44 @@ def test_wrap_claude_agent_sdk_delegates() -> None:
         api_url="https://enforcer.example",
         enforcement="block",
     )
+
+
+def test_wrap_toolchain_delegates_to_instrument_toolchain() -> None:
+    client = ThothClient(
+        agent_id="agent-1",
+        approved_scope=["sources.cloudtrail"],
+        tenant_id="trantor",
+        api_url="https://enforcer.example",
+    )
+    toolchain = {"sources": {"cloudtrail": lambda _: "ok"}}
+    with patch("thoth.client.instrument_toolchain", return_value=toolchain) as mock_toolchain:
+        result = client.wrap_toolchain(toolchain, enforcement="observe")
+
+    assert result is toolchain
+    mock_toolchain.assert_called_once_with(
+        toolchain,
+        agent_id="agent-1",
+        approved_scope=["sources.cloudtrail"],
+        tenant_id="trantor",
+        api_url="https://enforcer.example",
+        enforcement="observe",
+    )
+
+
+def test_build_function_map_delegates_to_toolchain_function_map() -> None:
+    client = ThothClient(
+        agent_id="agent-1",
+        approved_scope=["sources.cloudtrail"],
+        tenant_id="trantor",
+        api_url="https://enforcer.example",
+    )
+    toolchain = {"sources": {"cloudtrail": lambda _: "ok"}}
+    function_map = {"sources.cloudtrail": toolchain["sources"]["cloudtrail"]}
+    with patch("thoth.client.toolchain_function_map", return_value=function_map) as mock_function_map:
+        result = client.build_function_map(toolchain, include_private=True)
+
+    assert result is function_map
+    mock_function_map.assert_called_once_with(
+        toolchain,
+        include_private=True,
+    )
