@@ -2,6 +2,29 @@
 
 All notable changes to `atensec-thoth` are documented in this file.
 
+## 0.5.20 - 2026-06-15
+
+### Added
+
+- Added a LangGraph runtime enforcement example at
+  `examples/langchain/langgraph_runtime_enforcement.py` that demonstrates
+  observe and progressive enforcement flows using `instrument_toolchain()`.
+- Added a companion policy example at
+  `examples/langchain/policies/research_agent.rego` covering allow, step-up,
+  block, and flag outcomes for a research-agent toolchain.
+- Added a cookbook notebook at
+  `examples/langchain/cookbook_agent_governance.ipynb` with end-to-end shadow
+  and enforce walkthroughs.
+- Added a reusable composite GitHub Action at
+  `.github/actions/thoth-policy-check/` for static policy checks against
+  Python agent tool-call patterns.
+- Added a static analysis helper script at
+  `scripts/langchain/thoth_policy_check.py` used by the action.
+- Added a vendor-neutral RFC issue draft for LangGraph tool interception hooks
+  at `docs/contributions/langchain_rfc_tool_hooks.md`.
+- Added an engineering blog draft at
+  `docs/blog/langchain-runtime-enforcement.md`.
+
 ## 0.1.17 - 2026-05-18
 
 ### Added

@@ -14,7 +14,6 @@ import json
 import os
 
 import openai
-
 import thoth
 from thoth import ThothPolicyViolation
 

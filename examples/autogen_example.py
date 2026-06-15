@@ -13,7 +13,6 @@ Environment variables:
 import os
 
 import autogen
-
 import thoth
 
 # ---------------------------------------------------------------------------

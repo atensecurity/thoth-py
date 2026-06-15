@@ -16,10 +16,9 @@ Environment variables:
 
 import os
 
+import thoth
 from langchain_anthropic import ChatAnthropic
 from langgraph.prebuilt import create_react_agent
-
-import thoth
 from thoth import ThothPolicyViolation
 
 # ---------------------------------------------------------------------------

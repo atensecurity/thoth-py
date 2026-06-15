@@ -12,12 +12,11 @@ Environment variables:
 
 import os
 
+import thoth
 from langchain.agents import AgentExecutor, create_openai_tools_agent
 from langchain.tools import tool
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_openai import ChatOpenAI
-
-import thoth
 from thoth import ThothPolicyViolation
 
 # ---------------------------------------------------------------------------

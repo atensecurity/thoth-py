@@ -16,9 +16,8 @@ import os
 from pathlib import Path
 
 import anyio
-from claude_agent_sdk import ClaudeAgentOptions, query
-
 import thoth
+from claude_agent_sdk import ClaudeAgentOptions, query
 
 
 async def prompt_stream():

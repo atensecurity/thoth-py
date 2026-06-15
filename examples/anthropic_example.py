@@ -13,7 +13,6 @@ Environment variables:
 import os
 
 import anthropic
-
 import thoth
 from thoth import ThothPolicyViolation
 

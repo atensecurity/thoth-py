@@ -1,0 +1,79 @@
+name: "Thoth Policy Check"
+description: "Static policy validation for LangGraph/LangChain agent tool-call patterns."
+
+inputs:
+  agent_file:
+    description: "Path to the agent Python file."
+    required: true
+  policy_file:
+    description: "Path to the OPA policy file."
+    required: true
+  enforcement_mode:
+    description: "observe | enforce"
+    required: false
+    default: "observe"
+  fail_on_violations:
+    description: "true | false"
+    required: false
+    default: "false"
+
+outputs:
+  violations:
+    description: "JSON list of policy violations found."
+    value: ${{ steps.check.outputs.violations }}
+  shadow_report:
+    description: "Summary of what would have been blocked/stepped-up."
+    value: ${{ steps.check.outputs.shadow_report }}
+  pass_fail:
+    description: "Boolean pass/fail outcome."
+    value: ${{ steps.check.outputs.pass_fail }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: check
+      shell: bash
+      run: |
+        set -u -o pipefail
+
+        tmp_dir="$(mktemp -d)"
+        violations_file="$tmp_dir/violations.json"
+        shadow_file="$tmp_dir/shadow_report.json"
+        pass_file="$tmp_dir/pass_fail.txt"
+
+        script_path="${{ github.action_path }}/../../../scripts/langchain/thoth_policy_check.py"
+
+        status=0
+        python3 "$script_path" \
+          --agent-file "${{ inputs.agent_file }}" \
+          --policy-file "${{ inputs.policy_file }}" \
+          --enforcement-mode "${{ inputs.enforcement_mode }}" \
+          --fail-on-violations "${{ inputs.fail_on_violations }}" \
+          --violations-out "$violations_file" \
+          --shadow-report-out "$shadow_file" \
+          --pass-fail-out "$pass_file" \
+          || status=$?
+
+        if [[ ! -f "$violations_file" ]]; then
+          echo "[]" > "$violations_file"
+        fi
+        if [[ ! -f "$shadow_file" ]]; then
+          echo "{\"total_tools\":0,\"would_allow\":0,\"would_block\":0,\"would_step_up\":0,\"would_flag\":0,\"results\":[]}" > "$shadow_file"
+        fi
+        if [[ ! -f "$pass_file" ]]; then
+          echo "false" > "$pass_file"
+        fi
+
+        {
+          echo "violations<<EOF"
+          cat "$violations_file"
+          echo "EOF"
+          echo "shadow_report<<EOF"
+          cat "$shadow_file"
+          echo "EOF"
+          echo "pass_fail=$(cat "$pass_file")"
+        } >> "$GITHUB_OUTPUT"
+
+        if [[ "$status" -ne 0 ]]; then
+          exit "$status"
+        fi

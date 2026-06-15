@@ -12,10 +12,9 @@ Environment variables:
 
 import os
 
+import thoth
 from crewai import Agent, Crew, Task
 from crewai.tools import tool
-
-import thoth
 from thoth import ThothPolicyViolation
 
 # ---------------------------------------------------------------------------
