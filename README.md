@@ -583,9 +583,10 @@ The enforcer returns one of five decisions for each tool call:
 | `DEFER` | Call is postponed pending more context/workflow state. | SDK raises `ThothPolicyViolation` with defer context and timeout guidance. |
 | `BLOCK` | Call violates policy. | `ThothPolicyViolation` is raised before the tool executes. |
 
-Enforcer errors (for example, network timeout or 5xx) fail closed: the SDK treats them as
-`BLOCK` and raises `ThothPolicyViolation`. Authentication/ingress failures include diagnostic hints
-in logs to speed up misconfiguration debugging.
+By default, enforcer errors (for example, network timeout or 5xx) fail closed: the SDK treats them
+as `BLOCK` and raises `ThothPolicyViolation`. Set `fail_open=True` (or `THOTH_FAIL_OPEN=true`) to
+allow on transport/availability failures (network, 429, 5xx). Authentication/ingress failures
+remain blocked and include diagnostic hints in logs.
 
 ---
 
@@ -712,6 +713,7 @@ if session:
 | `task_context` | `dict[str, Any]` | `{}` | Delegation/task metadata included in enforcement payload + events. |
 | `environment` | `str` | `"prod"` | Environment selector included in `/v1/enforce` payload. |
 | `enforcement_trace_id` | `str \| None` | `None` | Optional explicit trace ID; falls back to `session_id`. |
+| `fail_open` | `bool` | `False` | Allow on enforcer infrastructure failures (`network`, `429`, `5xx`). Auth failures still block. |
 
 ### Environment Variables
 
@@ -722,6 +724,7 @@ if session:
 | `THOTH_EVENT_INGEST_TOKEN` | Optional dedicated telemetry token for `/v1/events/batch` (`X-Thoth-Event-Ingest-Token` header). |
 | `THOTH_API_URL` | Required tenant API base URL for both event ingestion and policy checks. Example: `https://enforce.<tenant>.<apex-domain>` |
 | `THOTH_ENVIRONMENT` | Optional environment selector (`prod`, `staging`, `dev`, etc.) sent to the enforcer payload. |
+| `THOTH_FAIL_OPEN` | Optional fail-open switch (`true/false`). When true, enforcer `network/429/5xx` failures return `ALLOW`; auth failures still block. |
 | `THOTH_LOG_LEVEL` | Optional SDK logger level override (`DEBUG`, `INFO`, `WARNING`, `ERROR`). If unset, SDK falls back to `LOG_LEVEL` when present. |
 
 Resolution precedence:

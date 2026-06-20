@@ -64,6 +64,54 @@ def test_falls_back_to_block_on_timeout(config):
 
 
 @respx.mock
+def test_fail_open_allows_on_timeout():
+    config = ThothConfig(
+        agent_id="test-agent",
+        approved_scope=["read:data"],
+        tenant_id="trantor",
+        api_url="http://enforcer:8080",
+        fail_open=True,
+    )
+    respx.post(f"{config.resolved_enforcer_url}/v1/enforce").mock(side_effect=httpx.TimeoutException("timeout"))
+    client = EnforcerClient(config)
+    decision = client.check("read:data", session_id="sess_1", tool_calls=[])
+    assert decision.is_allow
+    assert "fail-open" in (decision.reason or "").lower()
+
+
+@respx.mock
+def test_fail_open_allows_on_retryable_status():
+    config = ThothConfig(
+        agent_id="test-agent",
+        approved_scope=["read:data"],
+        tenant_id="trantor",
+        api_url="http://enforcer:8080",
+        fail_open=True,
+    )
+    respx.post(f"{config.resolved_enforcer_url}/v1/enforce").mock(return_value=httpx.Response(500, json={"error": "boom"}))
+    client = EnforcerClient(config)
+    decision = client.check("read:data", session_id="sess_1", tool_calls=[])
+    assert decision.is_allow
+    assert "status=500" in (decision.reason or "")
+
+
+@respx.mock
+def test_fail_open_still_blocks_on_auth_failure():
+    config = ThothConfig(
+        agent_id="test-agent",
+        approved_scope=["read:data"],
+        tenant_id="trantor",
+        api_url="http://enforcer:8080",
+        fail_open=True,
+    )
+    respx.post(f"{config.resolved_enforcer_url}/v1/enforce").mock(return_value=httpx.Response(403, json={"error": "forbidden"}))
+    client = EnforcerClient(config)
+    decision = client.check("read:data", session_id="sess_1", tool_calls=[])
+    assert decision.is_block
+    assert "status=403" in (decision.reason or "")
+
+
+@respx.mock
 def test_blocks_with_http_status_context(config):
     respx.post(f"{config.resolved_enforcer_url}/v1/enforce").mock(
         return_value=httpx.Response(

@@ -13,14 +13,26 @@ from thoth.models import DecisionType, EnforcementDecision, ThothConfig
 logger = logging.getLogger(__name__)
 
 _TIMEOUT = httpx.Timeout(connect=2.0, read=5.0, write=2.0, pool=2.0)
-_FALLBACK = EnforcementDecision(
+_FAIL_CLOSED_FALLBACK = EnforcementDecision(
     decision=DecisionType.BLOCK,
     reason="enforcer unavailable",
+)
+_FAIL_OPEN_FALLBACK = EnforcementDecision(
+    decision=DecisionType.ALLOW,
+    reason="enforcer unavailable (fail-open)",
 )
 
 
 def _blocked_with_reason(reason: str) -> EnforcementDecision:
     return EnforcementDecision(decision=DecisionType.BLOCK, reason=reason)
+
+
+def _allowed_with_reason(reason: str) -> EnforcementDecision:
+    return EnforcementDecision(decision=DecisionType.ALLOW, reason=reason)
+
+
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code == 429 or status_code >= 500
 
 
 class EnforcerClient:
@@ -72,7 +84,7 @@ class EnforcerClient:
         tool_calls: list[str],
         tool_args: dict[str, Any] | None = None,
     ) -> EnforcementDecision:
-        """Synchronous enforce call. Fail-closed -- returns BLOCK on any error."""
+        """Synchronous enforce call. Returns fallback decision on errors."""
         try:
             resp = self._http.post("/v1/enforce", json=self._payload(tool_name, session_id, tool_calls, tool_args=tool_args))
             resp.raise_for_status()
@@ -81,6 +93,15 @@ class EnforcerClient:
             response = exc.response
             detail = extract_http_error_detail(response)
             hint = auth_failure_hint(response.status_code, detail)
+            if self._config.resolved_fail_open and _is_retryable_status(response.status_code):
+                logger.warning(
+                    "thoth: enforcer returned retryable status=%s, fail-open fallback to ALLOW for tool=%s detail=%s",
+                    response.status_code,
+                    tool_name,
+                    detail,
+                    exc_info=True,
+                )
+                return _allowed_with_reason(f"enforcer unavailable (status={response.status_code}, fail-open)")
             logger.error(
                 "thoth: enforcer rejected request (status=%s url=%s tool=%s detail=%s)%s",
                 response.status_code,
@@ -92,12 +113,19 @@ class EnforcerClient:
             )
             return _blocked_with_reason(f"enforcer rejected request (status={response.status_code})")
         except Exception:
+            if self._config.resolved_fail_open:
+                logger.warning(
+                    "thoth: enforcer unreachable, fail-open fallback to ALLOW for tool=%s",
+                    tool_name,
+                    exc_info=True,
+                )
+                return _FAIL_OPEN_FALLBACK
             logger.error(
                 "thoth: enforcer unreachable, fail-closed fallback to BLOCK for tool=%s",
                 tool_name,
                 exc_info=True,
             )
-            return _FALLBACK
+            return _FAIL_CLOSED_FALLBACK
 
     async def acheck(
         self,
@@ -106,7 +134,7 @@ class EnforcerClient:
         tool_calls: list[str],
         tool_args: dict[str, Any] | None = None,
     ) -> EnforcementDecision:
-        """Async enforce call. Fail-closed -- returns BLOCK on any error."""
+        """Async enforce call. Returns fallback decision on errors."""
         try:
             resp = await self._async_http.post("/v1/enforce", json=self._payload(tool_name, session_id, tool_calls, tool_args=tool_args))
             resp.raise_for_status()
@@ -115,6 +143,15 @@ class EnforcerClient:
             response = exc.response
             detail = extract_http_error_detail(response)
             hint = auth_failure_hint(response.status_code, detail)
+            if self._config.resolved_fail_open and _is_retryable_status(response.status_code):
+                logger.warning(
+                    "thoth: enforcer returned retryable status=%s (async), fail-open fallback to ALLOW for tool=%s detail=%s",
+                    response.status_code,
+                    tool_name,
+                    detail,
+                    exc_info=True,
+                )
+                return _allowed_with_reason(f"enforcer unavailable (status={response.status_code}, fail-open)")
             logger.error(
                 "thoth: enforcer rejected request (async, status=%s url=%s tool=%s detail=%s)%s",
                 response.status_code,
@@ -126,12 +163,19 @@ class EnforcerClient:
             )
             return _blocked_with_reason(f"enforcer rejected request (status={response.status_code})")
         except Exception:
+            if self._config.resolved_fail_open:
+                logger.warning(
+                    "thoth: enforcer unreachable (async), fail-open fallback to ALLOW for tool=%s",
+                    tool_name,
+                    exc_info=True,
+                )
+                return _FAIL_OPEN_FALLBACK
             logger.error(
                 "thoth: enforcer unreachable (async), fail-closed fallback to BLOCK for tool=%s",
                 tool_name,
                 exc_info=True,
             )
-            return _FALLBACK
+            return _FAIL_CLOSED_FALLBACK
 
     def close(self) -> None:
         self._http.close()

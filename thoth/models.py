@@ -137,6 +137,9 @@ class ThothConfig(BaseModel):
     # Optional correlation identifier propagated across enforcer/fastml/deepllm.
     # Defaults to session_id when omitted.
     enforcement_trace_id: str | None = None
+    # When enabled, enforcer transport/availability failures return ALLOW
+    # instead of BLOCK. Auth failures still block.
+    fail_open: bool = False
 
     @property
     def resolved_api_url(self) -> str:
@@ -158,6 +161,14 @@ class ThothConfig(BaseModel):
         if override := os.getenv("THOTH_EVENT_INGEST_TOKEN"):
             return override.strip()
         return (self.event_ingest_token or "").strip()
+
+    @property
+    def resolved_fail_open(self) -> bool:
+        """Fail-open switch: THOTH_FAIL_OPEN env var > config field."""
+        override = os.getenv("THOTH_FAIL_OPEN")
+        if override is None:
+            return self.fail_open
+        return override.strip().lower() in {"1", "true", "yes", "on"}
 
 
 class EnforcementDecision(BaseModel):

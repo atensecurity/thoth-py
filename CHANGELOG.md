@@ -2,6 +2,22 @@
 
 All notable changes to `atensec-thoth` are documented in this file.
 
+## 0.5.21 - 2026-06-20
+
+### Changed
+
+- Added configurable resilience mode via `ThothConfig.fail_open` / `THOTH_FAIL_OPEN`.
+  When enabled, enforcer transport failures and retryable statuses (`429`, `5xx`)
+  return `ALLOW` so agent execution can continue.
+- Auth failures (`401`/`403`) remain fail-closed and continue returning `BLOCK`.
+- Added regression tests for fail-open timeout, retryable status, and auth-failure handling.
+- Added LangSmith coexistence integration coverage
+  (`tests/integrations/test_langsmith_compat.py`) to ensure `traceable` tools
+  continue to execute under Thoth governance wrappers.
+- Added observability-wrapper coexistence integration coverage for Datadog-like,
+  OpenTelemetry-like, and Sentry-like instrumentation patterns
+  (`tests/integrations/test_observability_compat.py`).
+
 ## 0.5.20 - 2026-06-15
 
 ### Added
