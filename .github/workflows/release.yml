@@ -83,7 +83,8 @@ jobs:
             START_LINE="$(
               grep -nE "^##[[:space:]]+v?${CANDIDATE_RE}[[:space:]]+-[[:space:]]+[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]]*$" CHANGELOG.md \
                 | head -n1 \
-                | cut -d: -f1
+                | cut -d: -f1 \
+                || true
             )"
             if [[ -n "${START_LINE}" ]]; then
               MATCHED_VERSION="${candidate}"
