@@ -1,14 +1,17 @@
 # thoth/enforcer_client.py
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
 from typing import Any
+import uuid
 
 import httpx
 
 from thoth.http_diagnostics import auth_failure_hint, extract_http_error_detail
 from thoth.logging_config import configure_thoth_logging_from_env
-from thoth.models import DecisionType, EnforcementDecision, ThothConfig
+from thoth.models import DecisionType, EnforcementDecision, HumanExplanation, ThothConfig
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +54,28 @@ class EnforcerClient:
         session_id: str,
         tool_calls: list[str],
         tool_args: dict[str, Any] | None = None,
+        action_attestation_id: str | None = None,
     ) -> dict[str, Any]:
         trace_id = self._config.enforcement_trace_id or session_id
+        attestation_id = action_attestation_id or self._config.action_attestation_id or str(uuid.uuid4())
+        identity_binding: dict[str, Any] = {
+            "agent_id": self._config.agent_id,
+            "tenant_id": self._config.tenant_id,
+            "user_id": self._config.user_id,
+        }
+        identity_binding.update(dict(self._config.identity_binding or {}))
+        auth_context = dict(self._config.auth_context or {})
+        metadata = dict(self._config.request_metadata or {})
+        runtime_identity = (self._config.mcp_runtime_identity or "").strip()
+        if runtime_identity:
+            metadata.setdefault("mcp_runtime_identity", runtime_identity)
+            auth_context.setdefault("service_identity", runtime_identity)
+
         payload: dict[str, Any] = {
             "agent_id": self._config.agent_id,
             "tenant_id": self._config.tenant_id,
             "user_id": self._config.user_id,
+            "identity_binding": identity_binding,
             "tool_name": tool_name,
             "session_id": session_id,
             "session_tool_calls": tool_calls,
@@ -64,7 +83,10 @@ class EnforcerClient:
             "enforcement_mode": self._config.enforcement.value,
             "environment": self._config.environment,
             "enforcement_trace_id": trace_id,
+            "action_attestation_id": attestation_id,
         }
+        if metadata:
+            payload["metadata"] = metadata
         if tool_args is not None:
             payload["tool_args"] = tool_args
         if self._config.session_intent is not None:
@@ -75,6 +97,51 @@ class EnforcerClient:
             payload["data_classification"] = self._config.data_classification
         if self._config.task_context:
             payload["task_context"] = self._config.task_context
+        if self._config.model_name is not None:
+            payload["model_name"] = self._config.model_name
+        if self._config.model_provider is not None:
+            payload["model_provider"] = self._config.model_provider
+        if self._config.model_artifact_id is not None:
+            payload["model_artifact_id"] = self._config.model_artifact_id
+        if self._config.model_artifact_version is not None:
+            payload["model_artifact_version"] = self._config.model_artifact_version
+        if auth_context:
+            payload["auth_context"] = auth_context
+        if self._config.delegation_context:
+            payload["delegation_context"] = dict(self._config.delegation_context)
+        return payload
+
+    def _explain_payload(
+        self,
+        decision: EnforcementDecision,
+        *,
+        tool_name: str,
+        session_id: str,
+        tool_calls: list[str],
+        tool_args: dict[str, Any] | None = None,
+        action_attestation_id: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = self._payload(
+            tool_name=tool_name,
+            session_id=session_id,
+            tool_calls=tool_calls,
+            tool_args=tool_args,
+            action_attestation_id=action_attestation_id,
+        )
+        payload.update(
+            {
+                "decision": decision.decision.value,
+                "decision_reason_code": decision.decision_reason_code,
+                "action_classification": decision.action_classification,
+                "violation_id": decision.violation_id,
+                "risk_score": decision.risk_score,
+                "regulatory_regimes": decision.regulatory_regimes,
+                "matched_rule_ids": decision.matched_rule_ids,
+                "matched_control_ids": decision.matched_control_ids,
+                "policy_references": decision.policy_references,
+                "step_up_timeout_seconds": decision.step_up_timeout_seconds,
+            }
+        )
         return payload
 
     def check(
@@ -83,10 +150,20 @@ class EnforcerClient:
         session_id: str,
         tool_calls: list[str],
         tool_args: dict[str, Any] | None = None,
+        action_attestation_id: str | None = None,
     ) -> EnforcementDecision:
         """Synchronous enforce call. Returns fallback decision on errors."""
         try:
-            resp = self._http.post("/v1/enforce", json=self._payload(tool_name, session_id, tool_calls, tool_args=tool_args))
+            resp = self._http.post(
+                "/v1/enforce",
+                json=self._payload(
+                    tool_name,
+                    session_id,
+                    tool_calls,
+                    tool_args=tool_args,
+                    action_attestation_id=action_attestation_id,
+                ),
+            )
             resp.raise_for_status()
             return EnforcementDecision.model_validate(resp.json())
         except httpx.HTTPStatusError as exc:
@@ -133,10 +210,20 @@ class EnforcerClient:
         session_id: str,
         tool_calls: list[str],
         tool_args: dict[str, Any] | None = None,
+        action_attestation_id: str | None = None,
     ) -> EnforcementDecision:
         """Async enforce call. Returns fallback decision on errors."""
         try:
-            resp = await self._async_http.post("/v1/enforce", json=self._payload(tool_name, session_id, tool_calls, tool_args=tool_args))
+            resp = await self._async_http.post(
+                "/v1/enforce",
+                json=self._payload(
+                    tool_name,
+                    session_id,
+                    tool_calls,
+                    tool_args=tool_args,
+                    action_attestation_id=action_attestation_id,
+                ),
+            )
             resp.raise_for_status()
             return EnforcementDecision.model_validate(resp.json())
         except httpx.HTTPStatusError as exc:
@@ -176,6 +263,110 @@ class EnforcerClient:
                 exc_info=True,
             )
             return _FAIL_CLOSED_FALLBACK
+
+    def explain(
+        self,
+        decision: EnforcementDecision,
+        *,
+        tool_name: str,
+        session_id: str,
+        tool_calls: list[str],
+        tool_args: dict[str, Any] | None = None,
+        action_attestation_id: str | None = None,
+    ) -> HumanExplanation | None:
+        try:
+            resp = self._http.post(
+                "/v1/explain",
+                json=self._explain_payload(
+                    decision,
+                    tool_name=tool_name,
+                    session_id=session_id,
+                    tool_calls=tool_calls,
+                    tool_args=tool_args,
+                    action_attestation_id=action_attestation_id,
+                ),
+            )
+            resp.raise_for_status()
+            explanation = HumanExplanation.model_validate(resp.json())
+            self._notify_webhook_background(explanation)
+            return explanation
+        except Exception:
+            logger.debug(
+                "thoth: explain request failed (sync) tool=%s violation_id=%s",
+                tool_name,
+                decision.violation_id,
+                exc_info=True,
+            )
+            return None
+
+    async def aexplain(
+        self,
+        decision: EnforcementDecision,
+        *,
+        tool_name: str,
+        session_id: str,
+        tool_calls: list[str],
+        tool_args: dict[str, Any] | None = None,
+        action_attestation_id: str | None = None,
+    ) -> HumanExplanation | None:
+        try:
+            resp = await self._async_http.post(
+                "/v1/explain",
+                json=self._explain_payload(
+                    decision,
+                    tool_name=tool_name,
+                    session_id=session_id,
+                    tool_calls=tool_calls,
+                    tool_args=tool_args,
+                    action_attestation_id=action_attestation_id,
+                ),
+            )
+            resp.raise_for_status()
+            explanation = HumanExplanation.model_validate(resp.json())
+            await self._anotify_webhook_background(explanation)
+            return explanation
+        except Exception:
+            logger.debug(
+                "thoth: explain request failed (async) tool=%s violation_id=%s",
+                tool_name,
+                decision.violation_id,
+                exc_info=True,
+            )
+            return None
+
+    def _notify_webhook_background(self, explanation: HumanExplanation) -> None:
+        url = (self._config.notification_webhook_url or "").strip()
+        if not url:
+            return
+
+        payload = explanation.model_dump(mode="json")
+
+        def _send() -> None:
+            try:
+                httpx.post(url, json=payload, timeout=2.0)
+            except Exception:
+                logger.debug("thoth: notification webhook delivery failed", exc_info=True)
+
+        threading.Thread(target=_send, daemon=True).start()
+
+    async def _anotify_webhook_background(self, explanation: HumanExplanation) -> None:
+        url = (self._config.notification_webhook_url or "").strip()
+        if not url:
+            return
+        payload = explanation.model_dump(mode="json")
+
+        async def _send() -> None:
+            try:
+                async with httpx.AsyncClient(timeout=2.0) as client:
+                    await client.post(url, json=payload)
+            except Exception:
+                logger.debug("thoth: async notification webhook delivery failed", exc_info=True)
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(_send())
 
     def close(self) -> None:
         self._http.close()

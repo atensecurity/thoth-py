@@ -17,6 +17,22 @@ All notable changes to `atensec-thoth` are documented in this file.
 - Added observability-wrapper coexistence integration coverage for Datadog-like,
   OpenTelemetry-like, and Sentry-like instrumentation patterns
   (`tests/integrations/test_observability_compat.py`).
+- Hardened `instrument()` wrapping for LangChain-style duck-typed tools so
+  `_run` and `run` are both governed even when LangChain classes are not
+  importable at runtime.
+- Fixed generic `.tools` wrapping for callable-only tool entries (plain
+  functions/callables), which are now replaced with governed callables instead
+  of bypassing enforcement.
+- Added regression tests for callable-only tool entries and LangChain
+  duck-typed `_run`/`run` wrapping in `tests/test_instrumentor.py`.
+- Added first-class LangGraph instrumentation APIs:
+  `instrument_langgraph()`, `instrument_tool_node()`, and `@thoth_graph`.
+- Added mock-mode LangGraph decision simulation (`THOTH_MOCK_MODE=true`) for
+  local end-to-end development without a live enforcer.
+- Added `ThothDeferredError` and LangGraph DEFER handling that raises without
+  executing the tool and emits defer metadata in tool telemetry.
+- Added a thread-safe session call-history path for concurrent LangGraph
+  branches via `SessionContext.pending_tool_calls(...)`.
 
 ## 0.5.20 - 2026-06-15
 

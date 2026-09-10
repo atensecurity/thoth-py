@@ -132,14 +132,34 @@ class ThothConfig(BaseModel):
     data_classification: str | None = None
     # Optional delegation/task context with initiated_by/task_id/chain keys.
     task_context: dict[str, Any] = Field(default_factory=dict)
+    # Optional model governance attributes for deterministic supply-chain checks.
+    model_name: str | None = None
+    model_provider: str | None = None
+    model_artifact_id: str | None = None
+    model_artifact_version: str | None = None
+    # Optional identity tuple for pre-execution binding checks.
+    identity_binding: dict[str, Any] = Field(default_factory=dict)
+    # Optional canonical auth/delegation contexts propagated to enforcer.
+    auth_context: dict[str, Any] = Field(default_factory=dict)
+    delegation_context: dict[str, Any] = Field(default_factory=dict)
+    # Optional runtime identity propagated for MCP capability-scoped checks.
+    mcp_runtime_identity: str | None = None
+    # Optional metadata merged into each /v1/enforce payload.
+    request_metadata: dict[str, Any] = Field(default_factory=dict)
     # Env-scoped policy lookup at enforcer side ("dev", "staging", "prod", ...).
     environment: str = "prod"
     # Optional correlation identifier propagated across enforcer/fastml/deepllm.
     # Defaults to session_id when omitted.
     enforcement_trace_id: str | None = None
+    # Optional per-action attestation identifier for independent action
+    # attestation workflows. Defaults to a generated UUID per tool call.
+    action_attestation_id: str | None = None
     # When enabled, enforcer transport/availability failures return ALLOW
     # instead of BLOCK. Auth failures still block.
     fail_open: bool = False
+    # Optional outbound webhook URL for BLOCK/STEP_UP human explanation delivery.
+    # SDK sends notifications asynchronously and never blocks tool execution.
+    notification_webhook_url: str | None = None
 
     @property
     def resolved_api_url(self) -> str:
@@ -175,6 +195,7 @@ class EnforcementDecision(BaseModel):
     decision: DecisionType
     decision_envelope_version: str | None = None
     enforcement_trace_id: str | None = None
+    action_attestation_id: str | None = None
     authorization_decision: str | None = None
     decision_reason_code: str | None = None
     action_classification: str | None = None
@@ -218,6 +239,8 @@ class EnforcementDecision(BaseModel):
             payload["risk_score"] = payload.get("riskScore")
         if not payload.get("enforcement_trace_id"):
             payload["enforcement_trace_id"] = payload.get("enforcementTraceId")
+        if not payload.get("action_attestation_id"):
+            payload["action_attestation_id"] = payload.get("actionAttestationId")
         if payload.get("fastml_features") is None and payload.get("fastmlFeatures") is not None:
             payload["fastml_features"] = payload.get("fastmlFeatures")
         if payload.get("score_components") is None and payload.get("scoreComponents") is not None:
@@ -295,3 +318,23 @@ class EnforcementDecision(BaseModel):
     @property
     def is_defer(self) -> bool:
         return self.decision == DecisionType.DEFER
+
+
+class HumanExplanation(BaseModel):
+    violation_id: str
+    tenant_id: str | None = None
+    session_id: str | None = None
+    agent_id: str | None = None
+    user_id: str | None = None
+    tool_name: str | None = None
+    what_happened: str
+    why_it_was_blocked: str
+    what_to_do_next: str
+    business_impact: str
+    request_url: str | None = None
+    timestamp: datetime | None = None
+    severity: str
+    regulatory_context: str | None = None
+    decision_reason_code: str | None = None
+    action_classification: str | None = None
+    risk_score: float | None = None

@@ -24,9 +24,15 @@ readme = "README.md"
 version = "0.5.21"
 
 [tool.poetry.dependencies]
+anthropic = {version = ">=0.40", optional = true}
 anyio = ">=4.0"
 boto3 = ">=1.34"
+claude-agent-sdk = {version = ">=0.1.66", optional = true}
 httpx = ">=0.27"
+langchain-core = {version = ">=0.2", optional = true}
+langgraph = {version = ">=0.2", optional = true}
+openai = {version = ">=1.50", optional = true}
+pyautogen = {version = ">=0.2", optional = true}
 pydantic = ">=2.0"
 python = ">=3.12,<3.15"
 
@@ -35,6 +41,7 @@ anthropic = ["anthropic"]
 autogen = ["pyautogen"]
 claude = ["claude-agent-sdk"]
 langchain = ["langchain-core"]
+langgraph = ["langgraph", "langchain-core"]
 openai = ["openai"]
 
 [tool.poetry.group.codespell.dependencies]
@@ -47,13 +54,6 @@ pytest = "==9.0.3"
 pytest-asyncio = "==1.3.0"
 respx = "==0.22.0"
 ruff = "==0.15.6"
-
-[tool.poetry.group.extras.dependencies]
-anthropic = {version = ">=0.40", optional = true}
-claude-agent-sdk = {version = ">=0.1.66", optional = true}
-langchain-core = {version = ">=0.2", optional = true}
-openai = {version = ">=1.50", optional = true}
-pyautogen = {version = ">=0.2", optional = true}
 
 [tool.poetry.urls]
 Documentation = "https://docs.atensecurity.com"

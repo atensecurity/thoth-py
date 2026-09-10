@@ -135,6 +135,15 @@ jobs:
           POETRY_DYNAMIC_VERSIONING_BYPASS: ${{ steps.version.outputs.version }}
         run: python -m build
 
+      - name: Validate built wheel before publication
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python -m unittest discover -s scripts -p test_check_wheel.py -v
+          python scripts/check_wheel.py dist/*.whl --version "$RELEASE_VERSION"
+          python scripts/test_package.py dist/*.whl
+          python scripts/test_package.py dist/*.whl --extras anthropic,autogen,claude,langchain,langgraph,openai --run-tests
+
       - name: Publish to PyPI (Trusted Publisher)
         id: publish_trusted
         continue-on-error: true

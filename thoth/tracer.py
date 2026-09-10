@@ -7,8 +7,9 @@ import inspect
 import logging
 from time import perf_counter
 from typing import Any, Callable, cast
+import uuid
 
-from thoth.emitter import SqsEmitter
+from thoth.emitter import HttpEmitter, SqsEmitter
 from thoth.enforcer_client import EnforcerClient
 from thoth.exceptions import ThothPolicyViolation
 from thoth.logging_config import configure_thoth_logging_from_env
@@ -17,6 +18,7 @@ from thoth.models import (
     EnforcementDecision,
     EnforcementMode,
     EventType,
+    HumanExplanation,
     SourceType,
     ThothConfig,
 )
@@ -107,6 +109,7 @@ def _decision_context(decision: EnforcementDecision) -> dict[str, Any]:
     return {
         "decision_envelope_version": decision.decision_envelope_version,
         "enforcement_trace_id": decision.enforcement_trace_id,
+        "action_attestation_id": decision.action_attestation_id,
         "decision_reason_code": decision.decision_reason_code,
         "action_classification": decision.action_classification,
         "authorization_decision": decision.authorization_decision or decision.decision.value,
@@ -122,7 +125,7 @@ def _decision_context(decision: EnforcementDecision) -> dict[str, Any]:
         "matched_control_ids": list(decision.matched_control_ids),
         "policy_references": list(decision.policy_references),
         "model_signals": list(decision.model_signals),
-        "fastml_features": dict(decision.fastml_features or {}),
+        "fastml_features": dict(decision.fastml_features) if decision.fastml_features is not None else None,
         "score_components": decision.score_components,
         "top_contributors": list(decision.top_contributors),
         "decision_evidence": decision.decision_evidence,
@@ -156,6 +159,7 @@ def _violation_from_decision(
     decision: EnforcementDecision,
     *,
     fallback_decision: EnforcementDecision | None = None,
+    explanation: HumanExplanation | None = None,
 ) -> ThothPolicyViolation:
     context = _merge_decision_context(decision, fallback_decision) if fallback_decision is not None else _decision_context(decision)
     return ThothPolicyViolation(
@@ -167,6 +171,7 @@ def _violation_from_decision(
         action_classification=context.get("action_classification"),
         authorization_decision=context.get("authorization_decision"),
         enforcement_trace_id=context.get("enforcement_trace_id"),
+        action_attestation_id=context.get("action_attestation_id"),
         fastml_features=context.get("fastml_features"),
         score_components=context.get("score_components"),
         top_contributors=context.get("top_contributors"),
@@ -184,6 +189,7 @@ def _violation_from_decision(
         policy_references=context.get("policy_references"),
         model_signals=context.get("model_signals"),
         receipt=context.get("receipt"),
+        explanation=explanation,
     )
 
 
@@ -206,13 +212,40 @@ def _policy_violation_metadata(exc: ThothPolicyViolation) -> dict[str, Any]:
         "policy_references": exc.policy_references,
         "model_signals": exc.model_signals,
         "enforcement_trace_id": exc.enforcement_trace_id,
+        "action_attestation_id": exc.action_attestation_id,
         "fastml_features": exc.fastml_features,
         "score_components": exc.score_components,
         "top_contributors": exc.top_contributors,
         "decision_evidence": exc.decision_evidence,
         "receipt": exc.receipt,
     }
+    if exc.explanation is not None:
+        explanation = exc.explanation
+        if hasattr(explanation, "model_dump"):
+            metadata["human_explanation"] = explanation.model_dump(mode="json")
+        else:
+            metadata["human_explanation"] = explanation
     return {k: v for k, v in metadata.items() if v is not None}
+
+
+def _coerce_human_explanation(value: Any) -> HumanExplanation | None:
+    if value is None:
+        return None
+    if isinstance(value, HumanExplanation):
+        return value
+    if isinstance(value, dict):
+        try:
+            return HumanExplanation.model_validate(value)
+        except Exception:
+            return None
+    return None
+
+
+def _resolve_action_attestation_id(config: ThothConfig) -> str:
+    configured = (config.action_attestation_id or "").strip()
+    if configured:
+        return configured
+    return str(uuid.uuid4())
 
 
 class Tracer:
@@ -220,7 +253,7 @@ class Tracer:
         self,
         config: ThothConfig,
         session: SessionContext,
-        emitter: SqsEmitter,
+        emitter: SqsEmitter | HttpEmitter,
         enforcer: EnforcerClient,
         step_up: StepUpClient,
     ) -> None:
@@ -236,6 +269,7 @@ class Tracer:
 
             @functools.wraps(fn)
             async def async_wrapped(*args: Any, **kwargs: Any) -> Any:
+                action_attestation_id = _resolve_action_attestation_id(self._config)
                 tool_args = _tool_args_from_call(args, kwargs)
                 started = perf_counter()
                 self._emit(
@@ -243,7 +277,11 @@ class Tracer:
                     EventType.TOOL_CALL_PRE,
                     "tool invocation requested",
                     metadata={
-                        **self._base_tool_metadata(tool_name, tool_args),
+                        **self._base_tool_metadata(
+                            tool_name,
+                            tool_args,
+                            action_attestation_id,
+                        ),
                         "event_phase": "pre",
                     },
                 )
@@ -253,6 +291,7 @@ class Tracer:
                         tool_args=tool_args,
                         call_args=args,
                         call_kwargs=kwargs,
+                        action_attestation_id=action_attestation_id,
                     )  # async path — does not block event loop
                 except ThothPolicyViolation as exc:
                     self._emit(
@@ -261,7 +300,11 @@ class Tracer:
                         exc.reason,
                         violation_id=exc.violation_id,
                         metadata={
-                            **self._base_tool_metadata(tool_name, tool_args),
+                            **self._base_tool_metadata(
+                                tool_name,
+                                tool_args,
+                                action_attestation_id,
+                            ),
                             "event_phase": "block",
                             "duration_ms": int((perf_counter() - started) * 1000),
                             **_policy_violation_metadata(exc),
@@ -275,7 +318,11 @@ class Tracer:
                     EventType.TOOL_CALL_POST,
                     "tool invocation completed",
                     metadata={
-                        **self._base_tool_metadata(tool_name, tool_args),
+                        **self._base_tool_metadata(
+                            tool_name,
+                            tool_args,
+                            action_attestation_id,
+                        ),
                         "event_phase": "post",
                         "duration_ms": int((perf_counter() - started) * 1000),
                         "authorization_decision": "ALLOW",
@@ -288,6 +335,7 @@ class Tracer:
 
         @functools.wraps(fn)
         def sync_wrapped(*args: Any, **kwargs: Any) -> Any:
+            action_attestation_id = _resolve_action_attestation_id(self._config)
             tool_args = _tool_args_from_call(args, kwargs)
             started = perf_counter()
             self._emit(
@@ -295,7 +343,11 @@ class Tracer:
                 EventType.TOOL_CALL_PRE,
                 "tool invocation requested",
                 metadata={
-                    **self._base_tool_metadata(tool_name, tool_args),
+                    **self._base_tool_metadata(
+                        tool_name,
+                        tool_args,
+                        action_attestation_id,
+                    ),
                     "event_phase": "pre",
                 },
             )
@@ -305,6 +357,7 @@ class Tracer:
                     tool_args=tool_args,
                     call_args=args,
                     call_kwargs=kwargs,
+                    action_attestation_id=action_attestation_id,
                 )
             except ThothPolicyViolation as exc:
                 self._emit(
@@ -313,7 +366,11 @@ class Tracer:
                     exc.reason,
                     violation_id=exc.violation_id,
                     metadata={
-                        **self._base_tool_metadata(tool_name, tool_args),
+                        **self._base_tool_metadata(
+                            tool_name,
+                            tool_args,
+                            action_attestation_id,
+                        ),
                         "event_phase": "block",
                         "duration_ms": int((perf_counter() - started) * 1000),
                         **_policy_violation_metadata(exc),
@@ -327,7 +384,11 @@ class Tracer:
                 EventType.TOOL_CALL_POST,
                 "tool invocation completed",
                 metadata={
-                    **self._base_tool_metadata(tool_name, tool_args),
+                    **self._base_tool_metadata(
+                        tool_name,
+                        tool_args,
+                        action_attestation_id,
+                    ),
                     "event_phase": "post",
                     "duration_ms": int((perf_counter() - started) * 1000),
                     "authorization_decision": "ALLOW",
@@ -345,6 +406,7 @@ class Tracer:
         *,
         call_args: tuple[Any, ...] = (),
         call_kwargs: dict[str, Any] | None = None,
+        action_attestation_id: str,
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         """Synchronous enforcement check.
 
@@ -362,13 +424,47 @@ class Tracer:
             session_id=self._session.session_id,
             tool_calls=pending_tool_calls,
             tool_args=tool_args,
+            action_attestation_id=action_attestation_id,
         )
-        self._log_decision(tool_name, decision, async_path=False)
+        if decision.action_attestation_id is None:
+            decision.action_attestation_id = action_attestation_id
+        self._log_decision(
+            tool_name,
+            decision,
+            async_path=False,
+            action_attestation_id=action_attestation_id,
+        )
+        explanation: HumanExplanation | None = None
+        if decision.is_block or decision.is_step_up:
+            explanation = self._enforcer.explain(
+                decision,
+                tool_name=tool_name,
+                session_id=self._session.session_id,
+                tool_calls=pending_tool_calls,
+                tool_args=tool_args,
+                action_attestation_id=action_attestation_id,
+            )
         step_up_initial: EnforcementDecision | None = None
         if decision.is_step_up and decision.hold_token:
             step_up_initial = decision
             decision = self._step_up.wait(decision.hold_token)
-            self._log_decision(tool_name, decision, async_path=False, phase="step_up_resolved")
+            if decision.action_attestation_id is None:
+                decision.action_attestation_id = action_attestation_id
+            self._log_decision(
+                tool_name,
+                decision,
+                async_path=False,
+                phase="step_up_resolved",
+                action_attestation_id=action_attestation_id,
+            )
+        if decision.is_step_up:
+            raise _violation_from_decision(
+                tool_name,
+                decision.reason or "step-up approval unresolved; tool was not executed",
+                decision,
+                fallback_decision=step_up_initial,
+                explanation=explanation,
+            )
         if decision.is_defer:
             reason = decision.defer_reason or decision.reason or "deferred pending additional context"
             if decision.defer_timeout_seconds and decision.defer_timeout_seconds > 0:
@@ -378,6 +474,7 @@ class Tracer:
                 reason,
                 decision,
                 fallback_decision=step_up_initial,
+                explanation=explanation,
             )
         if decision.is_block:
             raise _violation_from_decision(
@@ -385,6 +482,7 @@ class Tracer:
                 decision.reason or "blocked by Thoth policy",
                 decision,
                 fallback_decision=step_up_initial,
+                explanation=explanation,
             )
         if decision.is_modify:
             return _apply_modified_call_args(call_args, kwargs, decision.modified_tool_args)
@@ -397,6 +495,7 @@ class Tracer:
         *,
         call_args: tuple[Any, ...] = (),
         call_kwargs: dict[str, Any] | None = None,
+        action_attestation_id: str,
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         """Async enforcement check using non-blocking I/O.
 
@@ -414,13 +513,64 @@ class Tracer:
             session_id=self._session.session_id,
             tool_calls=pending_tool_calls,
             tool_args=tool_args,
+            action_attestation_id=action_attestation_id,
         )
-        self._log_decision(tool_name, decision, async_path=True)
+        if decision.action_attestation_id is None:
+            decision.action_attestation_id = action_attestation_id
+        self._log_decision(
+            tool_name,
+            decision,
+            async_path=True,
+            action_attestation_id=action_attestation_id,
+        )
+        explanation: HumanExplanation | None = None
+        if decision.is_block or decision.is_step_up:
+            maybe_explanation: Any = None
+            async_explain = getattr(self._enforcer, "aexplain", None)
+            if callable(async_explain):
+                maybe_explanation = async_explain(
+                    decision,
+                    tool_name=tool_name,
+                    session_id=self._session.session_id,
+                    tool_calls=pending_tool_calls,
+                    tool_args=tool_args,
+                    action_attestation_id=action_attestation_id,
+                )
+                if inspect.isawaitable(maybe_explanation):
+                    maybe_explanation = await maybe_explanation
+            else:
+                sync_explain = getattr(self._enforcer, "explain", None)
+                if callable(sync_explain):
+                    maybe_explanation = sync_explain(
+                        decision,
+                        tool_name=tool_name,
+                        session_id=self._session.session_id,
+                        tool_calls=pending_tool_calls,
+                        tool_args=tool_args,
+                        action_attestation_id=action_attestation_id,
+                    )
+            explanation = _coerce_human_explanation(maybe_explanation)
         step_up_initial: EnforcementDecision | None = None
         if decision.is_step_up and decision.hold_token:
             step_up_initial = decision
             decision = await self._step_up.await_decision(decision.hold_token)
-            self._log_decision(tool_name, decision, async_path=True, phase="step_up_resolved")
+            if decision.action_attestation_id is None:
+                decision.action_attestation_id = action_attestation_id
+            self._log_decision(
+                tool_name,
+                decision,
+                async_path=True,
+                phase="step_up_resolved",
+                action_attestation_id=action_attestation_id,
+            )
+        if decision.is_step_up:
+            raise _violation_from_decision(
+                tool_name,
+                decision.reason or "step-up approval unresolved; tool was not executed",
+                decision,
+                fallback_decision=step_up_initial,
+                explanation=explanation,
+            )
         if decision.is_defer:
             reason = decision.defer_reason or decision.reason or "deferred pending additional context"
             if decision.defer_timeout_seconds and decision.defer_timeout_seconds > 0:
@@ -430,6 +580,7 @@ class Tracer:
                 reason,
                 decision,
                 fallback_decision=step_up_initial,
+                explanation=explanation,
             )
         if decision.is_block:
             raise _violation_from_decision(
@@ -437,6 +588,7 @@ class Tracer:
                 decision.reason or "blocked by Thoth policy",
                 decision,
                 fallback_decision=step_up_initial,
+                explanation=explanation,
             )
         if decision.is_modify:
             return _apply_modified_call_args(call_args, kwargs, decision.modified_tool_args)
@@ -446,12 +598,14 @@ class Tracer:
         self,
         tool_name: str,
         tool_args: dict[str, Any] | None,
+        action_attestation_id: str,
     ) -> dict[str, Any]:
         trace_id = self._config.enforcement_trace_id or self._session.session_id
         metadata: dict[str, Any] = {
             "sdk_language": "python",
             "environment": self._config.environment,
             "enforcement_trace_id": trace_id,
+            "action_attestation_id": action_attestation_id,
             "tool_call": {
                 "name": tool_name,
                 "arguments": _to_jsonable(tool_args or {}),
@@ -478,6 +632,7 @@ class Tracer:
         violation_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
+        chain = self._config.task_context.get("chain")
         event = BehavioralEvent(
             tenant_id=self._config.tenant_id,
             agent_id=self._config.agent_id,
@@ -488,9 +643,7 @@ class Tracer:
             task_context=self._config.task_context,
             initiated_by=(str(self._config.task_context.get("initiated_by") or self._config.task_context.get("initiatedBy") or "").strip() or None),
             task_id=(str(self._config.task_context.get("task_id") or self._config.task_context.get("taskId") or "").strip() or None),
-            delegation_chain=[
-                str(item).strip() for item in (self._config.task_context.get("chain") if isinstance(self._config.task_context.get("chain"), list) else []) if str(item).strip()
-            ],
+            delegation_chain=[str(item).strip() for item in (chain if isinstance(chain, list) else []) if str(item).strip()],
             source_type=SourceType.AGENT_TOOL_CALL,
             event_type=event_type,
             tool_name=tool_name,
@@ -511,10 +664,12 @@ class Tracer:
         *,
         async_path: bool,
         phase: str = "enforce",
+        action_attestation_id: str | None = None,
     ) -> None:
         trace_id = self._config.enforcement_trace_id or self._session.session_id
+        resolved_attestation_id = decision.action_attestation_id or action_attestation_id or self._config.action_attestation_id
         logger.debug(
-            ("thoth %s decision (%s path) tool=%s decision=%s authorization_decision=%s hold_token=%s reason_code=%s reason=%s trace_id=%s session_id=%s"),
+            ("thoth %s decision (%s path) tool=%s decision=%s authorization_decision=%s hold_token=%s reason_code=%s reason=%s trace_id=%s action_attestation_id=%s session_id=%s"),
             phase,
             "async" if async_path else "sync",
             tool_name,
@@ -524,5 +679,6 @@ class Tracer:
             decision.decision_reason_code,
             decision.reason,
             trace_id,
+            resolved_attestation_id,
             self._session.session_id,
         )

@@ -227,6 +227,15 @@ def _build_components(
     purpose: str | None = None,
     data_classification: str | None = None,
     task_context: dict[str, Any] | None = None,
+    identity_binding: dict[str, Any] | None = None,
+    auth_context: dict[str, Any] | None = None,
+    delegation_context: dict[str, Any] | None = None,
+    model_name: str | None = None,
+    model_provider: str | None = None,
+    model_artifact_id: str | None = None,
+    model_artifact_version: str | None = None,
+    mcp_runtime_identity: str | None = None,
+    request_metadata: dict[str, Any] | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
@@ -252,6 +261,15 @@ def _build_components(
         purpose=purpose,
         data_classification=data_classification,
         task_context=task_context or {},
+        identity_binding=identity_binding or {},
+        auth_context=auth_context or {},
+        delegation_context=delegation_context or {},
+        model_name=model_name,
+        model_provider=model_provider,
+        model_artifact_id=model_artifact_id,
+        model_artifact_version=model_artifact_version,
+        mcp_runtime_identity=mcp_runtime_identity,
+        request_metadata=request_metadata or {},
         environment=resolved_environment,
         enforcement_trace_id=enforcement_trace_id,
     )
@@ -283,6 +301,15 @@ def instrument(
     purpose: str | None = None,
     data_classification: str | None = None,
     task_context: dict[str, Any] | None = None,
+    identity_binding: dict[str, Any] | None = None,
+    auth_context: dict[str, Any] | None = None,
+    delegation_context: dict[str, Any] | None = None,
+    model_name: str | None = None,
+    model_provider: str | None = None,
+    model_artifact_id: str | None = None,
+    model_artifact_version: str | None = None,
+    mcp_runtime_identity: str | None = None,
+    request_metadata: dict[str, Any] | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
@@ -310,6 +337,15 @@ def instrument(
         purpose,
         data_classification,
         task_context,
+        identity_binding,
+        auth_context,
+        delegation_context,
+        model_name,
+        model_provider,
+        model_artifact_id,
+        model_artifact_version,
+        mcp_runtime_identity,
+        request_metadata,
         environment,
         enforcement_trace_id,
         event_ingest_token,
@@ -333,6 +369,15 @@ def instrument_anthropic(
     purpose: str | None = None,
     data_classification: str | None = None,
     task_context: dict[str, Any] | None = None,
+    identity_binding: dict[str, Any] | None = None,
+    auth_context: dict[str, Any] | None = None,
+    delegation_context: dict[str, Any] | None = None,
+    model_name: str | None = None,
+    model_provider: str | None = None,
+    model_artifact_id: str | None = None,
+    model_artifact_version: str | None = None,
+    mcp_runtime_identity: str | None = None,
+    request_metadata: dict[str, Any] | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
@@ -374,6 +419,15 @@ def instrument_anthropic(
         purpose,
         data_classification,
         task_context,
+        identity_binding,
+        auth_context,
+        delegation_context,
+        model_name,
+        model_provider,
+        model_artifact_id,
+        model_artifact_version,
+        mcp_runtime_identity,
+        request_metadata,
         environment,
         enforcement_trace_id,
         event_ingest_token,
@@ -406,6 +460,15 @@ def instrument_openai(
     purpose: str | None = None,
     data_classification: str | None = None,
     task_context: dict[str, Any] | None = None,
+    identity_binding: dict[str, Any] | None = None,
+    auth_context: dict[str, Any] | None = None,
+    delegation_context: dict[str, Any] | None = None,
+    model_name: str | None = None,
+    model_provider: str | None = None,
+    model_artifact_id: str | None = None,
+    model_artifact_version: str | None = None,
+    mcp_runtime_identity: str | None = None,
+    request_metadata: dict[str, Any] | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
@@ -447,6 +510,15 @@ def instrument_openai(
         purpose,
         data_classification,
         task_context,
+        identity_binding,
+        auth_context,
+        delegation_context,
+        model_name,
+        model_provider,
+        model_artifact_id,
+        model_artifact_version,
+        mcp_runtime_identity,
+        request_metadata,
         environment,
         enforcement_trace_id,
         event_ingest_token,
@@ -479,6 +551,15 @@ def instrument_toolchain(
     purpose: str | None = None,
     data_classification: str | None = None,
     task_context: dict[str, Any] | None = None,
+    identity_binding: dict[str, Any] | None = None,
+    auth_context: dict[str, Any] | None = None,
+    delegation_context: dict[str, Any] | None = None,
+    model_name: str | None = None,
+    model_provider: str | None = None,
+    model_artifact_id: str | None = None,
+    model_artifact_version: str | None = None,
+    mcp_runtime_identity: str | None = None,
+    request_metadata: dict[str, Any] | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
@@ -506,6 +587,15 @@ def instrument_toolchain(
         purpose,
         data_classification,
         task_context,
+        identity_binding,
+        auth_context,
+        delegation_context,
+        model_name,
+        model_provider,
+        model_artifact_id,
+        model_artifact_version,
+        mcp_runtime_identity,
+        request_metadata,
         environment,
         enforcement_trace_id,
         event_ingest_token,
@@ -558,6 +648,15 @@ def instrument_claude_agent_sdk(
     purpose: str | None = None,
     data_classification: str | None = None,
     task_context: dict[str, Any] | None = None,
+    identity_binding: dict[str, Any] | None = None,
+    auth_context: dict[str, Any] | None = None,
+    delegation_context: dict[str, Any] | None = None,
+    model_name: str | None = None,
+    model_provider: str | None = None,
+    model_artifact_id: str | None = None,
+    model_artifact_version: str | None = None,
+    mcp_runtime_identity: str | None = None,
+    request_metadata: dict[str, Any] | None = None,
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
@@ -588,6 +687,15 @@ def instrument_claude_agent_sdk(
         purpose,
         data_classification,
         task_context,
+        identity_binding,
+        auth_context,
+        delegation_context,
+        model_name,
+        model_provider,
+        model_artifact_id,
+        model_artifact_version,
+        mcp_runtime_identity,
+        request_metadata,
         environment,
         enforcement_trace_id,
         event_ingest_token,
@@ -601,6 +709,17 @@ def instrument_claude_agent_sdk(
 
 def _wrap_agent_tools(agent: Any, tracer: Tracer) -> None:
     """Wrap tools on common agent shapes. Extend for each framework."""
+    tools = getattr(agent, "tools", None) or []
+
+    # LangChain AgentExecutor duck-typing fallback.
+    # If tools expose _run, ensure both run and _run are wrapped even when
+    # langchain isn't importable in the current runtime.
+    if any(hasattr(tool, "_run") for tool in tools):
+        from thoth.integrations.langchain import wrap_langchain_agent
+
+        wrap_langchain_agent(agent, tracer)
+        return
+
     # LangChain AgentExecutor
     try:
         from langchain.agents import AgentExecutor  # type: ignore[import-not-found]
@@ -626,13 +745,17 @@ def _wrap_agent_tools(agent: Any, tracer: Tracer) -> None:
         pass
 
     # Generic: any object with a .tools list
-    tools = getattr(agent, "tools", None)
     if not tools:
         return
-    for tool in tools:
-        tool_name = getattr(tool, "name", str(tool))
+
+    for idx, tool in enumerate(tools):
+        tool_name = getattr(tool, "name", None) or getattr(tool, "__name__", None) or str(tool)
         original_run = getattr(tool, "run", None) or (tool if callable(tool) else None)
         if original_run:
             wrapped = tracer.wrap_tool(tool_name, original_run)
-            attr = "run" if hasattr(tool, "run") else "__call__"
-            setattr(tool, attr, wrapped)
+            if hasattr(tool, "run"):
+                tool.run = wrapped
+            else:
+                # Callable-only tools (plain functions/callables) cannot be
+                # reliably patched via __call__; replace list entry directly.
+                tools[idx] = wrapped

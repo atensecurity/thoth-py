@@ -622,6 +622,17 @@ When the enforcer returns `STEP_UP`, Thoth automatically:
 3. If approved within `step_up_timeout_minutes` (default: 15 minutes) → tool executes.
 4. If timed out → raises `ThothPolicyViolation` with reason `"step-up auth timeout"`.
 
+If the response has no hold token, or approval remains unresolved after polling,
+the SDK raises `ThothPolicyViolation` and does not execute the tool. This applies
+to both synchronous and asynchronous wrapped tools. The Claude Agent SDK adapter
+returns a permission denial for the same conditions.
+
+The Claude adapter carries the provider's tool-use ID through authorization and
+tool lifecycle events, unless `action_attestation_id` is explicitly configured.
+These IDs correlate events; they do not establish authenticated workload identity.
+When a lifecycle hook has neither ID, it omits the action ID rather than guessing
+which concurrent call it belongs to.
+
 Configure timeouts via `ThothConfig`:
 
 ```python

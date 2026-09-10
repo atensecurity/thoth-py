@@ -1,13 +1,13 @@
 # tests/test_tracer.py
-import asyncio
 import logging
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
 from thoth import ThothPolicyViolation
 from thoth.emitter import SqsEmitter
 from thoth.enforcer_client import EnforcerClient
-from thoth.models import DecisionType, EnforcementDecision, EnforcementMode, ThothConfig
+from thoth.models import DecisionType, EnforcementDecision, EnforcementMode, EventType, ThothConfig
 from thoth.session import SessionContext
 from thoth.step_up import StepUpClient
 from thoth.tracer import Tracer
@@ -51,6 +51,7 @@ def test_emits_pre_and_post_events(tracer):
     assert pre_event.metadata["event_phase"] == "pre"
     assert pre_event.metadata["tool_call"]["name"] == "read:data"
     assert pre_event.metadata["sdk_language"] == "python"
+    assert pre_event.metadata["action_attestation_id"]
     assert post_event.metadata["event_phase"] == "post"
     assert post_event.metadata["authorization_decision"] == "ALLOW"
     assert post_event.metadata["result_type"] == "str"
@@ -71,6 +72,7 @@ def test_enforce_includes_current_tool_in_session_history(tracer):
     tracer._enforcer.check.assert_called_once()
     _, kwargs = tracer._enforcer.check.call_args
     assert kwargs["tool_calls"] == ["read:data"]
+    assert kwargs["action_attestation_id"]
 
 
 def test_raises_policy_violation_on_block(config):
@@ -117,6 +119,32 @@ def test_raises_policy_violation_on_block(config):
     assert block_event.metadata["decision_evidence"] == {"decision": "BLOCK", "authorization_decision": "DENY"}
 
 
+def test_block_violation_includes_human_explanation(config):
+    session = SessionContext(config)
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    step_up = MagicMock(spec=StepUpClient)
+    enforcer.check.return_value = EnforcementDecision(
+        decision=DecisionType.BLOCK,
+        reason="out of scope",
+        violation_id="vio_123",
+    )
+    enforcer.explain.return_value = {
+        "what_happened": "Your agent attempted to delete data.",
+        "what_to_do_next": "Contact #secops.",
+    }
+
+    t = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
+    wrapped = t.wrap_tool("write:s3", MagicMock())
+
+    with pytest.raises(ThothPolicyViolation) as exc:
+        wrapped()
+
+    assert exc.value.explanation is not None
+    assert "Contact #secops." in str(exc.value.explanation)
+    enforcer.explain.assert_called_once()
+
+
 def test_waits_for_step_up_then_allows(config):
     config.enforcement = EnforcementMode.STEP_UP
     session = SessionContext(config)
@@ -133,6 +161,107 @@ def test_waits_for_step_up_then_allows(config):
     result = wrapped()
     assert result == "done"
     step_up.wait.assert_called_once_with("tok_abc")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_tool", [False, True])
+@pytest.mark.parametrize("hold_token", [None, "pending-hold"])
+async def test_unresolved_step_up_never_executes_tool(config, tmp_path, async_tool, hold_token):
+    """A missing hold or still-pending approval is not permission to execute."""
+    session = SessionContext(config)
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    step_up = MagicMock(spec=StepUpClient)
+    initial = EnforcementDecision(decision=DecisionType.STEP_UP, hold_token=hold_token)
+    pending = EnforcementDecision(decision=DecisionType.STEP_UP)
+    enforcer.check.return_value = initial
+    enforcer.acheck = AsyncMock(return_value=initial)
+    enforcer.explain.return_value = None
+    enforcer.aexplain = AsyncMock(return_value=None)
+    step_up.wait.return_value = pending
+    step_up.await_decision = AsyncMock(return_value=pending)
+    tracer = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
+    target = tmp_path / "must-not-exist.txt"
+
+    def write_tool():
+        target.write_text("unauthorized side effect")
+
+    async def async_write_tool():
+        write_tool()
+
+    wrapped = tracer.wrap_tool("write:file", async_write_tool if async_tool else write_tool)
+    if async_tool:
+        with pytest.raises(ThothPolicyViolation) as violation:
+            await wrapped()
+    else:
+        with pytest.raises(ThothPolicyViolation) as violation:
+            wrapped()
+
+    assert not target.exists()
+    assert session.tool_calls == []
+    assert "step-up" in violation.value.reason
+    assert violation.value.authorization_decision == "STEP_UP"
+    events = [call.args[0] for call in emitter.emit.call_args_list]
+    assert [event.event_type for event in events] == [EventType.TOOL_CALL_PRE, EventType.TOOL_CALL_BLOCK]
+    assert events[0].metadata["action_attestation_id"] == events[1].metadata["action_attestation_id"]
+    if hold_token is None:
+        step_up.wait.assert_not_called()
+        step_up.await_decision.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_tool", [False, True])
+@pytest.mark.parametrize("pending_features", [None, {}, {"risk": 0.2}], ids=["missing", "empty", "replacement"])
+async def test_pending_step_up_preserves_decision_evidence(config, async_tool, pending_features):
+    session = SessionContext(config)
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    step_up = MagicMock(spec=StepUpClient)
+    initial_evidence = {"policy": "approval-required"}
+    initial = EnforcementDecision(
+        decision=DecisionType.STEP_UP,
+        hold_token="pending-hold",
+        fastml_features={"risk": 0.7},
+        decision_evidence=initial_evidence,
+        violation_id="vio_pending",
+        decision_reason_code="approval_required",
+    )
+    pending = EnforcementDecision(
+        decision=DecisionType.STEP_UP,
+        fastml_features=pending_features,
+    )
+    enforcer.check.return_value = initial
+    enforcer.acheck = AsyncMock(return_value=initial)
+    enforcer.explain.return_value = None
+    enforcer.aexplain = AsyncMock(return_value=None)
+    step_up.wait.return_value = pending
+    step_up.await_decision = AsyncMock(return_value=pending)
+    tracer = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
+    tool = AsyncMock() if async_tool else MagicMock()
+    wrapped = tracer.wrap_tool("Write", tool)
+
+    if async_tool:
+        with pytest.raises(ThothPolicyViolation) as violation:
+            await wrapped()
+        step_up.await_decision.assert_awaited_once_with("pending-hold")
+    else:
+        with pytest.raises(ThothPolicyViolation) as violation:
+            wrapped()
+        step_up.wait.assert_called_once_with("pending-hold")
+
+    tool.assert_not_called()
+    assert session.tool_calls == []
+    expected_features = initial.fastml_features if pending_features is None else pending_features or None
+    assert violation.value.fastml_features == expected_features
+    assert violation.value.decision_evidence == initial_evidence
+    assert violation.value.violation_id == "vio_pending"
+    assert violation.value.decision_reason_code == "approval_required"
+    events = [call.args[0] for call in emitter.emit.call_args_list]
+    assert [event.event_type for event in events] == [EventType.TOOL_CALL_PRE, EventType.TOOL_CALL_BLOCK]
+    assert events[-1].metadata.get("fastml_features") == expected_features
+    assert events[-1].metadata["decision_evidence"] == initial_evidence
+    assert events[-1].violation_id == "vio_pending"
+    assert events[-1].metadata["decision_reason_code"] == "approval_required"
 
 
 def test_modify_rewrites_tool_args(config):
@@ -191,8 +320,6 @@ def test_observe_mode_allows_out_of_scope(config):
 @pytest.mark.asyncio
 async def test_wrap_async_tool_executes(base_config):
     """wrap_tool must await async functions using the non-blocking async enforce path."""
-    from unittest.mock import AsyncMock
-
     session = SessionContext(base_config)
     emitter = SqsEmitter(queue_url=None)
     enforcer = MagicMock(spec=EnforcerClient)
@@ -222,8 +349,6 @@ async def test_wrap_async_tool_executes(base_config):
 @pytest.mark.asyncio
 async def test_async_tool_blocked_raises(base_config):
     """Async wrapped tools raise ThothPolicyViolation on BLOCK via the async enforce path."""
-    from unittest.mock import AsyncMock
-
     session = SessionContext(base_config)
     emitter = SqsEmitter(queue_url=None)
     enforcer = MagicMock(spec=EnforcerClient)

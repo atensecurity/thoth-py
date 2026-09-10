@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
 from thoth.instrumentor import (
     instrument,
@@ -25,10 +25,10 @@ class ThothClient:
         return instrument(agent, **self._merged(kwargs))
 
     def instrument_anthropic(self, tool_fns: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
-        return cast(dict[str, Any], instrument_anthropic(tool_fns, **self._merged(kwargs)))
+        return instrument_anthropic(tool_fns, **self._merged(kwargs))
 
     def instrument_openai(self, tool_fns: dict[str, Any], **kwargs: Any) -> dict[str, Any]:
-        return cast(dict[str, Any], instrument_openai(tool_fns, **self._merged(kwargs)))
+        return instrument_openai(tool_fns, **self._merged(kwargs))
 
     def instrument_claude_agent_sdk(self, options: Any | None = None, **kwargs: Any) -> Any:
         return instrument_claude_agent_sdk(options, **self._merged(kwargs))
@@ -39,7 +39,7 @@ class ThothClient:
     def toolchain_function_map(self, toolchain: Any, **kwargs: Any) -> dict[str, Any]:
         merged = self._merged(kwargs)
         supported = {key: merged[key] for key in ("include_private", "max_depth") if key in merged}
-        return cast(dict[str, Any], toolchain_function_map(toolchain, **supported))
+        return toolchain_function_map(toolchain, **supported)
 
     # Legacy aliases kept for backwards compatibility.
     def wrap(self, agent: Any, **kwargs: Any) -> Any:

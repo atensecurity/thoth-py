@@ -11,7 +11,7 @@ from typing import Any
 
 from thoth.exceptions import ThothPolicyViolation
 from thoth.models import EventType
-from thoth.tracer import Tracer
+from thoth.tracer import Tracer, _policy_violation_metadata, _resolve_action_attestation_id
 
 
 def _load_claude_agent_sdk_types() -> dict[str, type[Any]]:
@@ -49,6 +49,10 @@ def instrument_claude_agent_sdk_options(
 
     Returns:
         The same options object, mutated in-place with governance callbacks.
+
+    Provider tool-use IDs supply correlation, not authenticated attestation proof.
+    Hooks without a configured or provider ID cannot correlate a callback's
+    generated fallback ID and therefore omit the action ID.
     """
     sdk_types = _load_claude_agent_sdk_types()
     ClaudeAgentOptions = sdk_types["ClaudeAgentOptions"]
@@ -70,18 +74,32 @@ def instrument_claude_agent_sdk_options(
 
     existing_can_use_tool = options.can_use_tool
 
+    def known_action_id(provider_id: Any) -> str | None:
+        configured = (tracer._config.action_attestation_id or "").strip()
+        if configured:
+            return configured
+        return (provider_id.strip() or None) if isinstance(provider_id, str) else None
+
     async def governed_can_use_tool(
         tool_name: str,
         tool_input: dict[str, Any],
         context: Any,
     ) -> Any:
-        tracer._emit(tool_name, EventType.TOOL_CALL_PRE, str(tool_input))
+        action_attestation_id = known_action_id(getattr(context, "tool_use_id", None)) or _resolve_action_attestation_id(tracer._config)
+        metadata = tracer._base_tool_metadata(tool_name, tool_input, action_attestation_id)
+        tracer._emit(
+            tool_name,
+            EventType.TOOL_CALL_PRE,
+            str(tool_input),
+            metadata={**metadata, "event_phase": "pre"},
+        )
         try:
             call_args, _ = await tracer._aenforce(
                 tool_name,
                 tool_args=tool_input,
                 call_args=(tool_input,),
                 call_kwargs={},
+                action_attestation_id=action_attestation_id,
             )
         except ThothPolicyViolation as exc:
             tracer._emit(
@@ -89,6 +107,12 @@ def instrument_claude_agent_sdk_options(
                 EventType.TOOL_CALL_BLOCK,
                 exc.reason,
                 violation_id=exc.violation_id,
+                metadata={
+                    **metadata,
+                    **_policy_violation_metadata(exc),
+                    "action_attestation_id": action_attestation_id,
+                    "event_phase": "block",
+                },
             )
             return PermissionResultDeny(message=exc.reason, interrupt=False)
 
@@ -99,7 +123,12 @@ def instrument_claude_agent_sdk_options(
         if existing_can_use_tool is not None:
             result = await existing_can_use_tool(tool_name, updated_input, context)
             if isinstance(result, PermissionResultDeny):
-                tracer._emit(tool_name, EventType.TOOL_CALL_BLOCK, result.message)
+                tracer._emit(
+                    tool_name,
+                    EventType.TOOL_CALL_BLOCK,
+                    result.message,
+                    metadata={**metadata, "event_phase": "block"},
+                )
                 return result
             if isinstance(result, PermissionResultAllow):
                 if result.updated_input is None:
@@ -115,6 +144,18 @@ def instrument_claude_agent_sdk_options(
     if emit_tool_lifecycle_hooks:
         hooks = dict(options.hooks or {})
 
+        def hook_metadata(hook_input: dict[str, Any], tool_use_id: str | None) -> dict[str, Any]:
+            action_id = known_action_id(hook_input.get("tool_use_id")) or known_action_id(tool_use_id)
+            metadata = tracer._base_tool_metadata(
+                str(hook_input.get("tool_name", "")),
+                hook_input.get("tool_input"),
+                action_id or "",
+            )
+            if action_id is None:
+                # Never infer a callback match by tool name or generate a new ID here.
+                metadata.pop("action_attestation_id")
+            return metadata
+
         async def _post_tool_use(
             hook_input: dict[str, Any],
             _tool_use_id: str | None,
@@ -124,6 +165,7 @@ def instrument_claude_agent_sdk_options(
                 str(hook_input.get("tool_name", "")),
                 EventType.TOOL_CALL_POST,
                 str(hook_input.get("tool_response", "")),
+                metadata={**hook_metadata(hook_input, _tool_use_id), "event_phase": "post"},
             )
             return {}
 
@@ -136,6 +178,7 @@ def instrument_claude_agent_sdk_options(
                 str(hook_input.get("tool_name", "")),
                 EventType.TOOL_CALL_BLOCK,
                 str(hook_input.get("error", "tool execution failed")),
+                metadata={**hook_metadata(hook_input, _tool_use_id), "event_phase": "block"},
             )
             return {}
 

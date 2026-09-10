@@ -19,6 +19,16 @@ class FakeAgent:
         self.tools = tools
 
 
+class FakeLangChainTool:
+    name = "search"
+
+    def run(self, query):
+        return f"run:{query}"
+
+    def _run(self, query):
+        return f"_run:{query}"
+
+
 class NestedToolchain:
     def fetch(self, payload):
         return self.parse(payload)
@@ -58,6 +68,42 @@ def test_instrument_wraps_tools():
         assert result == "result:test"
 
 
+def test_instrument_langchain_duck_typing_wraps_run_and__run():
+    agent = FakeAgent(tools=[FakeLangChainTool()])
+    with patch("thoth.instrumentor.EnforcerClient") as MockEnforcer, patch("thoth.instrumentor.HttpEmitter"):
+        MockEnforcer.return_value.check.return_value = EnforcementDecision(decision=DecisionType.ALLOW)
+        thoth.instrument(
+            agent,
+            agent_id="my-agent",
+            approved_scope=["search"],
+            tenant_id="trantor",
+            api_url="https://enforcer.example",
+        )
+
+        assert agent.tools[0].run("query-1") == "run:query-1"
+        assert agent.tools[0]._run("query-2") == "_run:query-2"
+        assert MockEnforcer.return_value.check.call_count == 2
+
+
+def test_instrument_wraps_callable_tool_entries():
+    def search(query):
+        return f"search:{query}"
+
+    agent = FakeAgent(tools=[search])
+    with patch("thoth.instrumentor.EnforcerClient") as MockEnforcer, patch("thoth.instrumentor.HttpEmitter"):
+        MockEnforcer.return_value.check.return_value = EnforcementDecision(decision=DecisionType.ALLOW)
+        thoth.instrument(
+            agent,
+            agent_id="my-agent",
+            approved_scope=["search"],
+            tenant_id="trantor",
+            api_url="https://enforcer.example",
+        )
+
+        assert agent.tools[0]("incident") == "search:incident"
+        assert MockEnforcer.return_value.check.call_count == 1
+
+
 def test_instrument_raises_on_block():
     agent = FakeAgent(tools=[FakeTool()])
     with patch("thoth.instrumentor.EnforcerClient") as MockEnforcer, patch("thoth.instrumentor.HttpEmitter"):
@@ -76,6 +122,30 @@ def test_instrument_raises_on_block():
         )
         with pytest.raises(ThothPolicyViolation):
             agent.tools[0].run("test")
+
+
+def test_instrument_callable_tool_entries_raise_on_block():
+    def search(query):
+        return f"search:{query}"
+
+    agent = FakeAgent(tools=[search])
+    with patch("thoth.instrumentor.EnforcerClient") as MockEnforcer, patch("thoth.instrumentor.HttpEmitter"):
+        MockEnforcer.return_value.check.return_value = EnforcementDecision(
+            decision=DecisionType.BLOCK,
+            reason="blocked",
+            violation_id="vio_001",
+        )
+        thoth.instrument(
+            agent,
+            agent_id="my-agent",
+            approved_scope=[],
+            tenant_id="trantor",
+            enforcement="block",
+            api_url="https://enforcer.example",
+        )
+
+        with pytest.raises(ThothPolicyViolation):
+            agent.tools[0]("test")
 
 
 def test_instrument_claude_agent_sdk_delegates():
