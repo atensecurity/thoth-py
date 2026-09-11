@@ -1,13 +1,14 @@
 # tests/test_emitter.py
+from datetime import UTC, datetime
 import json
 import time
-from datetime import datetime, timezone
 
 import boto3
 import httpx
-import pytest
 from moto import mock_aws
-from thoth.emitter import _BATCH_MAX, HttpEmitter, SqsEmitter
+import pytest
+
+from thoth.emitter import HttpEmitter, SqsEmitter
 from thoth.models import BehavioralEvent, EventType, SourceType
 
 
@@ -39,7 +40,7 @@ def make_event(session_id: str = "sess_abc") -> BehavioralEvent:
         event_type=EventType.TOOL_CALL_PRE,
         content="read:invoices",
         approved_scope=["read:invoices"],
-        occurred_at=datetime.now(timezone.utc),
+        occurred_at=datetime.now(UTC),
     )
 
 
@@ -112,6 +113,69 @@ class RecordingSQSClient:
     def send_message_batch(self, *, QueueUrl, Entries):  # type: ignore[no-untyped-def]
         self.entries.extend(Entries)
         return {"Successful": [{"Id": entry["Id"]} for entry in Entries]}
+
+
+class PartialFailureSQSClient:
+    def __init__(self) -> None:
+        self.calls: list[list[dict]] = []
+
+    def send_message_batch(self, *, QueueUrl, Entries):  # type: ignore[no-untyped-def]
+        self.calls.append(Entries)
+        if len(self.calls) == 1:
+            return {
+                "Successful": [{"Id": Entries[0]["Id"]}],
+                "Failed": [{"Id": Entries[1]["Id"], "Code": "ServiceUnavailable", "SenderFault": False}],
+            }
+        return {"Successful": [{"Id": entry["Id"]} for entry in Entries], "Failed": []}
+
+
+def test_http_retries_transient_failures_with_stable_ids():
+    event = make_event()
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        status = 202 if len(requests) == 3 else 503
+        return httpx.Response(status, request=request)
+
+    emitter = HttpEmitter("https://ingest.example", "test-key")
+    emitter._http.close()
+    emitter._http = httpx.Client(transport=httpx.MockTransport(handle))
+    result = emitter._send_batch([event])
+
+    assert result.delivered_event_ids == [event.event_id]
+    assert result.dropped_event_ids == []
+    assert result.attempts == 3
+    assert [json.loads(request.content)[0]["event_id"] for request in requests] == [event.event_id] * 3
+
+
+def test_http_close_is_bounded_and_reports_delivery_status():
+    emitter = HttpEmitter("https://ingest.example", "test-key")
+    emitter._http.close()
+    emitter._http = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(202, request=request)))
+    emitter.emit(make_event())
+
+    status = emitter.close(timeout=2.0)
+
+    assert status.pending == 0
+    assert status.delivered == 1
+    assert status.dropped == 0
+
+
+def test_sqs_retries_only_failed_entries_with_stable_ids():
+    events = [make_event("session-1"), make_event("session-2")]
+    client = PartialFailureSQSClient()
+    emitter = SqsEmitter(queue_url=None)
+    emitter._queue_url = "https://sqs.example/queue.fifo"
+    emitter._client = client
+
+    result = emitter._send_batch(events)
+
+    assert [len(call) for call in client.calls] == [2, 1]
+    assert client.calls[0][1]["MessageDeduplicationId"] == client.calls[1][0]["MessageDeduplicationId"]
+    assert set(result.delivered_event_ids) == {event.event_id for event in events}
+    assert result.dropped_event_ids == []
+    assert result.attempts == 2
 
 
 def test_http_telemetry_uses_minimal_projection_without_mutating_authorization_event():

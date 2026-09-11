@@ -93,7 +93,7 @@ def _safe_evidence(value: Any) -> dict[str, Any] | None:
         if isinstance(value.get(key), str):
             result[key] = value[key]
     for key in _EVIDENCE_NUMBER_FIELDS:
-        if isinstance(value.get(key), (int, float)) and not isinstance(value.get(key), bool):
+        if isinstance(value.get(key), int | float) and not isinstance(value.get(key), bool):
             result[key] = value[key]
     for key in _ID_LIST_FIELDS:
         if (items := _string_list(value.get(key))) is not None:
@@ -120,7 +120,7 @@ def telemetry_event(event: BehavioralEvent) -> dict[str, Any]:
         if isinstance(source.get(key), str):
             metadata[key] = source[key]
     for key in _NUMBER_FIELDS:
-        if isinstance(source.get(key), (int, float)) and not isinstance(source.get(key), bool):
+        if isinstance(source.get(key), int | float) and not isinstance(source.get(key), bool):
             metadata[key] = source[key]
     for key in _ID_LIST_FIELDS:
         if (items := _string_list(source.get(key))) is not None:
