@@ -669,15 +669,13 @@ class Tracer:
         trace_id = self._config.enforcement_trace_id or self._session.session_id
         resolved_attestation_id = decision.action_attestation_id or action_attestation_id or self._config.action_attestation_id
         logger.debug(
-            ("thoth %s decision (%s path) tool=%s decision=%s authorization_decision=%s hold_token=%s reason_code=%s reason=%s trace_id=%s action_attestation_id=%s session_id=%s"),
+            ("thoth %s decision (%s path) tool=%s decision=%s authorization_decision=%s reason_code=%s trace_id=%s action_attestation_id=%s session_id=%s"),
             phase,
             "async" if async_path else "sync",
             tool_name,
             decision.decision.value,
             decision.authorization_decision,
-            decision.hold_token,
             decision.decision_reason_code,
-            decision.reason,
             trace_id,
             resolved_attestation_id,
             self._session.session_id,

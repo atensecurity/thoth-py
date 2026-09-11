@@ -58,6 +58,37 @@ def test_emits_pre_and_post_events(tracer):
     assert isinstance(post_event.metadata["duration_ms"], int)
 
 
+def test_decision_debug_log_omits_sensitive_reason_and_hold_token(config, caplog):
+    tracer = Tracer(
+        config=config,
+        session=SessionContext(config),
+        emitter=MagicMock(spec=SqsEmitter),
+        enforcer=MagicMock(spec=EnforcerClient),
+        step_up=MagicMock(spec=StepUpClient),
+    )
+    decision = EnforcementDecision(
+        decision=DecisionType.STEP_UP,
+        authorization_decision="STEP_UP",
+        decision_reason_code="approval_required",
+        reason="SYNTHETIC-PHI-SECRET-REASON",
+        hold_token="SYNTHETIC-PHI-SECRET-HOLD",
+    )
+
+    with caplog.at_level(logging.DEBUG, logger="thoth.tracer"):
+        tracer._log_decision(
+            "read:data",
+            decision,
+            async_path=False,
+            action_attestation_id="action-safe-001",
+        )
+
+    rendered = caplog.text
+    assert "SYNTHETIC-PHI-SECRET-REASON" not in rendered
+    assert "SYNTHETIC-PHI-SECRET-HOLD" not in rendered
+    assert "approval_required" in rendered
+    assert "action-safe-001" in rendered
+
+
 def test_records_tool_call_in_session(tracer):
     tool = MagicMock(return_value="ok")
     wrapped = tracer.wrap_tool("read:data", tool)
@@ -392,7 +423,7 @@ def test_wrap_tool_preserves_name(base_config):
     assert wrapped.__name__ == "my_named_tool"
 
 
-def test_log_decision_includes_hold_token(config, caplog):
+def test_log_decision_excludes_hold_token(config, caplog):
     session = SessionContext(config)
     emitter = MagicMock(spec=SqsEmitter)
     enforcer = MagicMock(spec=EnforcerClient)
@@ -407,4 +438,5 @@ def test_log_decision_includes_hold_token(config, caplog):
     with caplog.at_level(logging.DEBUG, logger="thoth.tracer"):
         tracer._log_decision("write:slack", decision, async_path=False)
 
-    assert "hold_token=tok_step_up_123" in caplog.text
+    assert "hold_token=tok_step_up_123" not in caplog.text
+    assert "decision=STEP_UP" in caplog.text

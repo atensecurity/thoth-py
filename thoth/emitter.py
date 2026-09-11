@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 from queue import Empty, Full, Queue
 import threading
@@ -13,6 +14,7 @@ import httpx
 from thoth.http_diagnostics import auth_failure_hint, extract_http_error_detail
 from thoth.logging_config import configure_thoth_logging_from_env
 from thoth.models import BehavioralEvent
+from thoth.telemetry import telemetry_event
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +69,7 @@ class SqsEmitter:
                 Entries=[
                     {
                         "Id": str(i),
-                        "MessageBody": e.model_dump_json(),
+                        "MessageBody": json.dumps(telemetry_event(e), separators=(",", ":")),
                         "MessageGroupId": e.session_id,
                         "MessageDeduplicationId": e.event_id,
                     }
@@ -153,7 +155,7 @@ class HttpEmitter:
 
     def _send_batch(self, events: list[BehavioralEvent]) -> None:
         try:
-            payload = [e.model_dump(mode="json") for e in events]
+            payload = [telemetry_event(e) for e in events]
             self._http.post(self._endpoint, json=payload).raise_for_status()
         except httpx.HTTPStatusError as exc:
             response = exc.response
