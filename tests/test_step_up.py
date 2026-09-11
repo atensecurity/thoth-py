@@ -2,7 +2,8 @@
 import httpx
 import pytest
 import respx
-from thoth.models import DecisionType, ThothConfig
+
+from thoth.models import ThothConfig
 from thoth.step_up import StepUpClient
 
 
@@ -73,3 +74,25 @@ def test_returns_block_on_timeout():
     decision = client.wait("tok_789")
     assert decision.is_block  # timeout -> block
     assert "timeout" in (decision.reason or "").lower()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_async", [False, True])
+@pytest.mark.parametrize("second_async", [False, True])
+async def test_timeout_evidence_is_isolated_between_actions(config, first_async, second_async):
+    """Tracer annotates timeout decisions; later actions must receive fresh state."""
+    client = StepUpClient(config.model_copy(update={"step_up_timeout_minutes": 0}))
+    try:
+        first = await client.await_decision("first") if first_async else client.wait("first")
+        second = await client.await_decision("second") if second_async else client.wait("second")
+        assert first is not second
+        first.action_attestation_id = "first-action"
+        first.enforcement_trace_id = "first-trace"
+        first.receipt = {"receipt_id": "first-receipt"}
+        assert second.is_block
+        assert second.action_attestation_id is None
+        assert second.enforcement_trace_id is None
+        assert second.receipt is None
+    finally:
+        client.close()
+        await client.aclose()

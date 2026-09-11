@@ -2,6 +2,13 @@
 
 All notable changes to `atensec-thoth` are documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- Return a fresh approval-timeout decision for every sync and async call, so
+  blocked-event evidence cannot inherit an earlier action's attestation ID.
+
 ## 0.5.21 - 2026-06-20
 
 ### Changed

@@ -13,10 +13,16 @@ from thoth.models import DecisionType, EnforcementDecision, ThothConfig
 
 logger = logging.getLogger(__name__)
 
-_TIMEOUT_DECISION = EnforcementDecision(
-    decision=DecisionType.BLOCK,
-    reason="step-up auth timeout — no approver response",
-)
+
+def _timeout_decision() -> EnforcementDecision:
+    # Tracer attaches per-action correlation fields to decisions. Never share a
+    # mutable timeout result between calls, clients, or sync/async paths.
+    return EnforcementDecision(
+        decision=DecisionType.BLOCK,
+        reason="step-up auth timeout — no approver response",
+    )
+
+
 _HTTP_TIMEOUT = httpx.Timeout(connect=2.0, read=6.0, write=2.0, pool=2.0)
 
 
@@ -70,7 +76,7 @@ class StepUpClient:
                 logger.warning("thoth: error polling hold token %s", hold_token, exc_info=True)
             time.sleep(self._config.step_up_poll_interval_seconds)
         logger.warning("thoth: step-up auth timed out for hold_token=%s", hold_token)
-        return _TIMEOUT_DECISION
+        return _timeout_decision()
 
     async def await_decision(self, hold_token: str) -> EnforcementDecision:
         """Async poll until approved/blocked or timeout. Does not block the event loop."""
@@ -86,7 +92,7 @@ class StepUpClient:
                 logger.warning("thoth: error polling hold token (async) %s", hold_token, exc_info=True)
             await asyncio.sleep(self._config.step_up_poll_interval_seconds)
         logger.warning("thoth: step-up auth timed out for hold_token=%s", hold_token)
-        return _TIMEOUT_DECISION
+        return _timeout_decision()
 
     def close(self) -> None:
         self._http.close()
