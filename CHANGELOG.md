@@ -2,12 +2,53 @@
 
 All notable changes to `atensec-thoth` are documented in this file.
 
-## Unreleased
+## 0.5.22 - 2026-09-11
+
+### Added
+
+- Added first-class LangGraph support through `instrument_langgraph()`,
+  `instrument_tool_node()`, and `@thoth_graph`, including synchronous and
+  asynchronous tool execution, concurrent call history, mock mode, and explicit
+  `ThothDeferredError` handling.
+- Added per-action attestation IDs across authorization, Claude Agent SDK hooks,
+  lifecycle events, policy errors, and decision evidence. Provider tool-use IDs
+  are used for correlation only and are never represented as authenticated
+  workload identity.
+- Added model name/provider/artifact context, authentication and delegation
+  context, MCP runtime identity, and caller metadata to authorization requests.
+- Added human-explanation retrieval for blocked and step-up decisions with
+  optional bounded webhook delivery.
+- Added wheel-content validation and clean installed-package tests for the base
+  package and the Anthropic, AutoGen, Claude, LangChain, LangGraph, and OpenAI
+  extras.
 
 ### Fixed
 
 - Return a fresh approval-timeout decision for every sync and async call, so
   blocked-event evidence cannot inherit an earlier action's attestation ID.
+- Reject unresolved or malformed step-up results without executing the tool,
+  and keep synchronous and asynchronous fallback enforcement to one decision
+  per action.
+- Reject Claude callback results that identify a different action, and avoid
+  correlating concurrent callbacks by tool name when no trusted action ID is
+  available.
+- Govern callable-only tool collections and LangChain-style duck-typed
+  `_run`/`run` tools even when their framework classes are unavailable.
+- Correct optional dependency declarations and restore SDK type-check coverage.
+
+### Changed
+
+- Minimized retained HTTP and SQS telemetry with an explicit allowlist. Tool
+  arguments, free-text context, results, errors, explanations, full receipts,
+  and unknown metadata remain available to authorization but are not retained
+  by default.
+- Added bounded HTTP and SQS delivery retries with stable event and FIFO
+  deduplication identifiers. Retrying telemetry never re-executes a governed
+  tool or repeats its authorization decision.
+- Added SQS partial-batch failure handling, process-local delivery counters,
+  and bounded shutdown through `close(timeout=...)`.
+- Documented the telemetry privacy boundary and the limits of process-local
+  delivery status.
 
 ## 0.5.21 - 2026-06-20
 
