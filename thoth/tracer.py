@@ -1,6 +1,7 @@
 # thoth/tracer.py
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import functools
 import inspect
@@ -27,6 +28,14 @@ from thoth.step_up import StepUpClient
 
 logger = logging.getLogger(__name__)
 UTC = UTC
+
+
+@dataclass(frozen=True, slots=True)
+class _EnforcementOutcome:
+    effective_args: tuple[Any, ...]
+    effective_kwargs: dict[str, Any]
+    decision: EnforcementDecision | None
+    initial_decision: EnforcementDecision | None = None
 
 
 def _to_jsonable(value: Any, *, depth: int = 0) -> Any:
@@ -130,6 +139,7 @@ def _decision_context(decision: EnforcementDecision) -> dict[str, Any]:
         "top_contributors": list(decision.top_contributors),
         "decision_evidence": decision.decision_evidence,
         "receipt": decision.receipt,
+        "terminal_receipt": decision.terminal_receipt,
     }
 
 
@@ -151,6 +161,14 @@ def _merge_decision_context(
             continue
         merged[key] = primary_value
     return merged
+
+
+def _enforcement_outcome_context(outcome: _EnforcementOutcome) -> dict[str, Any]:
+    if outcome.decision is None:
+        return {}
+    if outcome.initial_decision is not None:
+        return _merge_decision_context(outcome.decision, outcome.initial_decision)
+    return _decision_context(outcome.decision)
 
 
 def _violation_from_decision(
@@ -189,6 +207,7 @@ def _violation_from_decision(
         policy_references=context.get("policy_references"),
         model_signals=context.get("model_signals"),
         receipt=context.get("receipt"),
+        terminal_receipt=context.get("terminal_receipt"),
         explanation=explanation,
     )
 
@@ -218,6 +237,7 @@ def _policy_violation_metadata(exc: ThothPolicyViolation) -> dict[str, Any]:
         "top_contributors": exc.top_contributors,
         "decision_evidence": exc.decision_evidence,
         "receipt": exc.receipt,
+        "terminal_receipt": exc.terminal_receipt,
     }
     if exc.explanation is not None:
         explanation = exc.explanation
@@ -226,6 +246,40 @@ def _policy_violation_metadata(exc: ThothPolicyViolation) -> dict[str, Any]:
         else:
             metadata["human_explanation"] = explanation
     return {k: v for k, v in metadata.items() if v is not None}
+
+
+def _bind_decision_correlation(
+    tool_name: str,
+    decision: EnforcementDecision,
+    *,
+    action_attestation_id: str,
+    enforcement_trace_id: str,
+) -> EnforcementDecision:
+    """Bind a response to the local request without accepting server rebinding."""
+    if decision.action_attestation_id not in (None, "", action_attestation_id):
+        raise ThothPolicyViolation(
+            tool_name=tool_name,
+            reason="enforcer response identifies a different action; tool was not executed",
+            action_attestation_id=action_attestation_id,
+            enforcement_trace_id=enforcement_trace_id,
+            authorization_decision="BLOCK",
+            decision_reason_code="action_attestation_id_mismatch",
+        )
+    if decision.enforcement_trace_id not in (None, "", enforcement_trace_id):
+        raise ThothPolicyViolation(
+            tool_name=tool_name,
+            reason="enforcer response identifies a different trace; tool was not executed",
+            action_attestation_id=action_attestation_id,
+            enforcement_trace_id=enforcement_trace_id,
+            authorization_decision="BLOCK",
+            decision_reason_code="enforcement_trace_id_mismatch",
+        )
+    return decision.model_copy(
+        update={
+            "action_attestation_id": action_attestation_id,
+            "enforcement_trace_id": enforcement_trace_id,
+        }
+    )
 
 
 def _coerce_human_explanation(value: Any) -> HumanExplanation | None:
@@ -286,7 +340,7 @@ class Tracer:
                     },
                 )
                 try:
-                    effective_args, effective_kwargs = await self._aenforce(
+                    enforcement = await self._aenforce(
                         tool_name,
                         tool_args=tool_args,
                         call_args=args,
@@ -311,8 +365,9 @@ class Tracer:
                         },
                     )
                     raise
-                result = await fn(*effective_args, **effective_kwargs)
+                result = await fn(*enforcement.effective_args, **enforcement.effective_kwargs)
                 self._session.record_tool_call(tool_name)
+                decision_context = _enforcement_outcome_context(enforcement)
                 self._emit(
                     tool_name,
                     EventType.TOOL_CALL_POST,
@@ -325,7 +380,7 @@ class Tracer:
                         ),
                         "event_phase": "post",
                         "duration_ms": int((perf_counter() - started) * 1000),
-                        "authorization_decision": "ALLOW",
+                        **decision_context,
                         **_result_summary(result),
                     },
                 )
@@ -352,7 +407,7 @@ class Tracer:
                 },
             )
             try:
-                effective_args, effective_kwargs = self._enforce(
+                enforcement = self._enforce(
                     tool_name,
                     tool_args=tool_args,
                     call_args=args,
@@ -377,8 +432,9 @@ class Tracer:
                     },
                 )
                 raise
-            result = fn(*effective_args, **effective_kwargs)
+            result = fn(*enforcement.effective_args, **enforcement.effective_kwargs)
             self._session.record_tool_call(tool_name)
+            decision_context = _enforcement_outcome_context(enforcement)
             self._emit(
                 tool_name,
                 EventType.TOOL_CALL_POST,
@@ -391,7 +447,7 @@ class Tracer:
                     ),
                     "event_phase": "post",
                     "duration_ms": int((perf_counter() - started) * 1000),
-                    "authorization_decision": "ALLOW",
+                    **decision_context,
                     **_result_summary(result),
                 },
             )
@@ -407,15 +463,15 @@ class Tracer:
         call_args: tuple[Any, ...] = (),
         call_kwargs: dict[str, Any] | None = None,
         action_attestation_id: str,
-    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    ) -> _EnforcementOutcome:
         """Synchronous enforcement check.
 
-        Returns potentially modified call args/kwargs. Raises ThothPolicyViolation
-        when policy blocks or defers execution.
+        Returns potentially modified call args/kwargs and the final decision.
+        Raises ThothPolicyViolation when policy blocks or defers execution.
         """
         kwargs = dict(call_kwargs or {})
         if self._config.enforcement == EnforcementMode.OBSERVE:
-            return call_args, kwargs
+            return _EnforcementOutcome(call_args, kwargs, None)
         pending_tool_calls = list(self._session.tool_calls)
         if not pending_tool_calls or pending_tool_calls[-1] != tool_name:
             pending_tool_calls.append(tool_name)
@@ -426,8 +482,13 @@ class Tracer:
             tool_args=tool_args,
             action_attestation_id=action_attestation_id,
         )
-        if decision.action_attestation_id is None:
-            decision.action_attestation_id = action_attestation_id
+        enforcement_trace_id = self._config.enforcement_trace_id or self._session.session_id
+        decision = _bind_decision_correlation(
+            tool_name,
+            decision,
+            action_attestation_id=action_attestation_id,
+            enforcement_trace_id=enforcement_trace_id,
+        )
         self._log_decision(
             tool_name,
             decision,
@@ -448,8 +509,12 @@ class Tracer:
         if decision.is_step_up and decision.hold_token:
             step_up_initial = decision
             decision = self._step_up.wait(decision.hold_token)
-            if decision.action_attestation_id is None:
-                decision.action_attestation_id = action_attestation_id
+            decision = _bind_decision_correlation(
+                tool_name,
+                decision,
+                action_attestation_id=action_attestation_id,
+                enforcement_trace_id=enforcement_trace_id,
+            )
             self._log_decision(
                 tool_name,
                 decision,
@@ -485,8 +550,13 @@ class Tracer:
                 explanation=explanation,
             )
         if decision.is_modify:
-            return _apply_modified_call_args(call_args, kwargs, decision.modified_tool_args)
-        return call_args, kwargs
+            effective_args, effective_kwargs = _apply_modified_call_args(
+                call_args,
+                kwargs,
+                decision.modified_tool_args,
+            )
+            return _EnforcementOutcome(effective_args, effective_kwargs, decision, step_up_initial)
+        return _EnforcementOutcome(call_args, kwargs, decision, step_up_initial)
 
     async def _aenforce(
         self,
@@ -496,15 +566,15 @@ class Tracer:
         call_args: tuple[Any, ...] = (),
         call_kwargs: dict[str, Any] | None = None,
         action_attestation_id: str,
-    ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    ) -> _EnforcementOutcome:
         """Async enforcement check using non-blocking I/O.
 
-        Returns potentially modified call args/kwargs. Raises ThothPolicyViolation
-        when policy blocks or defers execution.
+        Returns potentially modified call args/kwargs and the final decision.
+        Raises ThothPolicyViolation when policy blocks or defers execution.
         """
         kwargs = dict(call_kwargs or {})
         if self._config.enforcement == EnforcementMode.OBSERVE:
-            return call_args, kwargs
+            return _EnforcementOutcome(call_args, kwargs, None)
         pending_tool_calls = list(self._session.tool_calls)
         if not pending_tool_calls or pending_tool_calls[-1] != tool_name:
             pending_tool_calls.append(tool_name)
@@ -515,8 +585,13 @@ class Tracer:
             tool_args=tool_args,
             action_attestation_id=action_attestation_id,
         )
-        if decision.action_attestation_id is None:
-            decision.action_attestation_id = action_attestation_id
+        enforcement_trace_id = self._config.enforcement_trace_id or self._session.session_id
+        decision = _bind_decision_correlation(
+            tool_name,
+            decision,
+            action_attestation_id=action_attestation_id,
+            enforcement_trace_id=enforcement_trace_id,
+        )
         self._log_decision(
             tool_name,
             decision,
@@ -554,8 +629,12 @@ class Tracer:
         if decision.is_step_up and decision.hold_token:
             step_up_initial = decision
             decision = await self._step_up.await_decision(decision.hold_token)
-            if decision.action_attestation_id is None:
-                decision.action_attestation_id = action_attestation_id
+            decision = _bind_decision_correlation(
+                tool_name,
+                decision,
+                action_attestation_id=action_attestation_id,
+                enforcement_trace_id=enforcement_trace_id,
+            )
             self._log_decision(
                 tool_name,
                 decision,
@@ -591,8 +670,13 @@ class Tracer:
                 explanation=explanation,
             )
         if decision.is_modify:
-            return _apply_modified_call_args(call_args, kwargs, decision.modified_tool_args)
-        return call_args, kwargs
+            effective_args, effective_kwargs = _apply_modified_call_args(
+                call_args,
+                kwargs,
+                decision.modified_tool_args,
+            )
+            return _EnforcementOutcome(effective_args, effective_kwargs, decision, step_up_initial)
+        return _EnforcementOutcome(call_args, kwargs, decision, step_up_initial)
 
     def _base_tool_metadata(
         self,

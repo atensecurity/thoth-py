@@ -72,6 +72,37 @@ def test_thoth_config_env_api_url_overrides_field(monkeypatch: pytest.MonkeyPatc
     assert config.resolved_enforcer_url == "https://enforce.env.atensecurity.com"
 
 
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [(" trace-abc ", "trace-abc"), (" \t\n ", None)],
+)
+def test_thoth_config_normalizes_enforcement_trace_id(configured, expected):
+    config = ThothConfig(
+        agent_id="my-agent",
+        approved_scope=["read:data"],
+        tenant_id="trantor",
+        enforcement_trace_id=configured,
+    )
+
+    assert config.enforcement_trace_id == expected
+
+
+@pytest.mark.parametrize(
+    ("configured", "expected"),
+    [(" trace-abc ", "trace-abc"), (" \t\n ", None)],
+)
+def test_thoth_config_normalizes_assigned_enforcement_trace_id(configured, expected):
+    config = ThothConfig(
+        agent_id="my-agent",
+        approved_scope=["read:data"],
+        tenant_id="trantor",
+    )
+
+    config.enforcement_trace_id = configured
+
+    assert config.enforcement_trace_id == expected
+
+
 def test_enforcement_decision_allow():
     decision = EnforcementDecision(decision=DecisionType.ALLOW)
     assert decision.is_allow

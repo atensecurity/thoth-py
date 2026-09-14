@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 import importlib
+import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
@@ -14,6 +16,7 @@ import pytest
 from thoth.integrations.claude_agent_sdk import instrument_claude_agent_sdk_options
 from thoth.models import DecisionType, EnforcementDecision, EnforcementMode, EventType, ThothConfig
 from thoth.session import SessionContext
+from thoth.telemetry import telemetry_event
 from thoth.tracer import Tracer
 
 
@@ -158,6 +161,139 @@ async def test_post_tool_hooks_emit_events() -> None:
 
     assert tracer._emitter.emit.call_args_list[-2].args[0].event_type == EventType.TOOL_CALL_POST
     assert tracer._emitter.emit.call_args_list[-1].args[0].event_type == EventType.TOOL_CALL_BLOCK
+
+
+@pytest.mark.asyncio
+async def test_post_hook_retains_matching_authorization_once_without_sensitive_fields() -> None:
+    secret = "SYNTHETIC-CLAUDE-DECISION-SECRET"
+    tracer = _make_tracer()
+    tracer._enforcer.acheck = AsyncMock(
+        return_value=EnforcementDecision(
+            decision=DecisionType.ALLOW,
+            decision_reason_code="policy_scope_allow",
+            decision_evidence={
+                "policy": {"policy_id": "policy-safe-001"},
+                "secret": secret,
+            },
+            receipt={"receipt_id": "receipt-safe-001", "secret": secret},
+            reason=secret,
+        )
+    )
+    with patch("thoth.integrations.claude_agent_sdk._load_claude_agent_sdk_types", return_value=_fake_sdk_types()):
+        options = instrument_claude_agent_sdk_options(FakeClaudeAgentOptions(), tracer)
+
+    context = SimpleNamespace(tool_use_id="toolu-safe-001")
+    await options.can_use_tool("Read", {"path": secret}, context)
+    post_hook = options.hooks["PostToolUse"][0].hooks[0]
+    hook_input = {
+        "tool_name": "Read",
+        "tool_input": {"path": secret},
+        "tool_response": {"secret": secret},
+        "tool_use_id": "toolu-safe-001",
+    }
+    await post_hook(hook_input, None, {})
+
+    post = tracer._emitter.emit.call_args_list[-1].args[0]
+    retained = telemetry_event(post)["metadata"]
+    assert retained["authorization_decision"] == "ALLOW"
+    assert retained["decision_reason_code"] == "policy_scope_allow"
+    assert retained["decision_evidence"]["policy"]["policy_id"] == "policy-safe-001"
+    assert retained["receipt"]["receipt_id"] == "receipt-safe-001"
+    assert secret not in json.dumps(retained, sort_keys=True)
+
+    await post_hook(hook_input, None, {})
+    repeated = telemetry_event(tracer._emitter.emit.call_args_list[-1].args[0])["metadata"]
+    assert "authorization_decision" not in repeated
+    assert "decision_reason_code" not in repeated
+
+
+@pytest.mark.asyncio
+async def test_concurrent_post_hooks_keep_decisions_scoped_to_provider_action_ids() -> None:
+    tracer = _make_tracer()
+
+    async def decide(**kwargs: Any) -> EnforcementDecision:
+        action_id = kwargs["action_attestation_id"]
+        return EnforcementDecision(
+            decision=DecisionType.ALLOW,
+            decision_reason_code=f"allow_{action_id}",
+        )
+
+    tracer._enforcer.acheck = AsyncMock(side_effect=decide)
+    with patch("thoth.integrations.claude_agent_sdk._load_claude_agent_sdk_types", return_value=_fake_sdk_types()):
+        options = instrument_claude_agent_sdk_options(FakeClaudeAgentOptions(), tracer)
+
+    await asyncio.gather(
+        options.can_use_tool("Read", {"path": "first"}, SimpleNamespace(tool_use_id="toolu-first")),
+        options.can_use_tool("Read", {"path": "second"}, SimpleNamespace(tool_use_id="toolu-second")),
+    )
+    post_hook = options.hooks["PostToolUse"][0].hooks[0]
+    for action_id in ("toolu-second", "toolu-first"):
+        await post_hook(
+            {
+                "tool_name": "Read",
+                "tool_input": {"path": action_id},
+                "tool_response": {"ok": True},
+                "tool_use_id": action_id,
+            },
+            None,
+            {},
+        )
+
+    posts = [telemetry_event(call.args[0])["metadata"] for call in tracer._emitter.emit.call_args_list if call.args[0].event_type == EventType.TOOL_CALL_POST]
+    assert [post["action_attestation_id"] for post in posts] == ["toolu-second", "toolu-first"]
+    assert [post["decision_reason_code"] for post in posts] == ["allow_toolu-second", "allow_toolu-first"]
+
+
+@pytest.mark.asyncio
+async def test_configured_action_id_correlates_post_decision_without_provider_id() -> None:
+    tracer = _make_tracer()
+    tracer._config.action_attestation_id = "configured-action-001"
+    tracer._enforcer.acheck = AsyncMock(
+        return_value=EnforcementDecision(
+            decision=DecisionType.ALLOW,
+            decision_reason_code="configured_scope_allow",
+        )
+    )
+    with patch("thoth.integrations.claude_agent_sdk._load_claude_agent_sdk_types", return_value=_fake_sdk_types()):
+        options = instrument_claude_agent_sdk_options(FakeClaudeAgentOptions(), tracer)
+
+    await options.can_use_tool("Read", {"path": "safe"}, object())
+    post_hook = options.hooks["PostToolUse"][0].hooks[0]
+    await post_hook(
+        {"tool_name": "Read", "tool_input": {"path": "safe"}, "tool_response": {"ok": True}},
+        None,
+        {},
+    )
+
+    retained = telemetry_event(tracer._emitter.emit.call_args_list[-1].args[0])["metadata"]
+    assert retained["action_attestation_id"] == "configured-action-001"
+    assert retained["authorization_decision"] == "ALLOW"
+    assert retained["decision_reason_code"] == "configured_scope_allow"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_configured_action_id_does_not_cross_wire_post_decisions() -> None:
+    tracer = _make_tracer()
+    tracer._config.action_attestation_id = "configured-action-duplicate"
+    reasons = iter(("first_allow", "second_allow"))
+    tracer._enforcer.acheck = AsyncMock(
+        side_effect=lambda **_: EnforcementDecision(
+            decision=DecisionType.ALLOW,
+            decision_reason_code=next(reasons),
+        )
+    )
+    with patch("thoth.integrations.claude_agent_sdk._load_claude_agent_sdk_types", return_value=_fake_sdk_types()):
+        options = instrument_claude_agent_sdk_options(FakeClaudeAgentOptions(), tracer)
+
+    await options.can_use_tool("Read", {"path": "first"}, object())
+    await options.can_use_tool("Read", {"path": "second"}, object())
+    post_hook = options.hooks["PostToolUse"][0].hooks[0]
+    await post_hook({"tool_name": "Read"}, None, {})
+
+    retained = telemetry_event(tracer._emitter.emit.call_args_list[-1].args[0])["metadata"]
+    assert retained["action_attestation_id"] == "configured-action-duplicate"
+    assert "authorization_decision" not in retained
+    assert "decision_reason_code" not in retained
 
 
 @pytest.fixture
@@ -341,8 +477,12 @@ async def test_missing_provider_id_does_not_invent_post_correlation(real_sdk: An
     hook = options.hooks[hook_name][-1].hooks[0]
     await hook({"tool_name": "Write"}, None, {})
     assert "action_attestation_id" not in _tool_events(tracer)[-1].metadata
+    assert "authorization_decision" not in _tool_events(tracer)[-1].metadata
+    assert "decision_reason_code" not in _tool_events(tracer)[-1].metadata
     await hook({"tool_name": "Write", "tool_use_id": "unseen-provider-id"}, None, {})
     assert _tool_events(tracer)[-1].metadata["action_attestation_id"] == "unseen-provider-id"
+    assert "authorization_decision" not in _tool_events(tracer)[-1].metadata
+    assert "decision_reason_code" not in _tool_events(tracer)[-1].metadata
 
 
 @pytest.mark.asyncio

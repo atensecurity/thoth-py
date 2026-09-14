@@ -33,6 +33,7 @@ class ThothPolicyViolation(Exception):  # noqa: N818
         policy_references: list[str] | None = None,
         model_signals: list[str] | None = None,
         receipt: dict[str, Any] | None = None,
+        terminal_receipt: dict[str, Any] | None = None,
         explanation: Any | None = None,
     ) -> None:
         self.tool_name = tool_name
@@ -61,6 +62,7 @@ class ThothPolicyViolation(Exception):  # noqa: N818
         self.policy_references = list(policy_references or [])
         self.model_signals = list(model_signals or [])
         self.receipt = dict(receipt or {}) if receipt else None
+        self.terminal_receipt = dict(terminal_receipt or {}) if terminal_receipt else None
         self.explanation = explanation
         super().__init__(f"Thoth blocked tool '{tool_name}': {reason}" + (f" (violation_id={violation_id})" if violation_id else ""))
 
@@ -94,6 +96,7 @@ class ThothDeferredError(ThothPolicyViolation):
         policy_references: list[str] | None = None,
         model_signals: list[str] | None = None,
         receipt: dict[str, Any] | None = None,
+        terminal_receipt: dict[str, Any] | None = None,
         explanation: Any | None = None,
     ) -> None:
         super().__init__(
@@ -123,5 +126,6 @@ class ThothDeferredError(ThothPolicyViolation):
             policy_references=policy_references,
             model_signals=model_signals,
             receipt=receipt,
+            terminal_receipt=terminal_receipt,
             explanation=explanation,
         )

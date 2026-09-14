@@ -11,7 +11,9 @@ from typing import Any
 
 from thoth.exceptions import ThothPolicyViolation
 from thoth.models import EventType
-from thoth.tracer import Tracer, _policy_violation_metadata, _resolve_action_attestation_id
+from thoth.tracer import Tracer, _enforcement_outcome_context, _policy_violation_metadata, _resolve_action_attestation_id
+
+_MAX_PENDING_DECISIONS = 1024
 
 
 def _load_claude_agent_sdk_types() -> dict[str, type[Any]]:
@@ -52,7 +54,9 @@ def instrument_claude_agent_sdk_options(
 
     Provider tool-use IDs supply correlation, not authenticated attestation proof.
     Hooks without a configured or provider ID cannot correlate a callback's
-    generated fallback ID and therefore omit the action ID.
+    generated fallback ID and therefore omit the action ID and decision context.
+    Pending decision context is bounded and consumed by the first matching
+    post-success or post-failure hook.
     """
     sdk_types = _load_claude_agent_sdk_types()
     ClaudeAgentOptions = sdk_types["ClaudeAgentOptions"]
@@ -73,6 +77,29 @@ def instrument_claude_agent_sdk_options(
     )
 
     existing_can_use_tool = options.can_use_tool
+    pending_decisions: dict[str, dict[str, Any]] = {}
+
+    def provider_action_id(value: Any) -> str | None:
+        return (value.strip() or None) if isinstance(value, str) else None
+
+    def decision_map_key(provider_id: Any) -> str | None:
+        return (tracer._config.action_attestation_id or "").strip() or provider_action_id(provider_id)
+
+    def remember_decision(provider_id: Any, decision_context: dict[str, Any]) -> None:
+        key = decision_map_key(provider_id)
+        if key is None:
+            return
+        # A reused action correlation ID is ambiguous. Empty context fails evidence
+        # correlation closed without affecting the authorization result.
+        pending_decisions[key] = {} if key in pending_decisions else decision_context
+        while len(pending_decisions) > _MAX_PENDING_DECISIONS:
+            pending_decisions.pop(next(iter(pending_decisions)))
+
+    def take_decision(provider_id: Any) -> dict[str, Any]:
+        key = decision_map_key(provider_id)
+        if key is None:
+            return {}
+        return pending_decisions.pop(key, {})
 
     def known_action_id(provider_id: Any) -> str | None:
         configured = (tracer._config.action_attestation_id or "").strip()
@@ -85,7 +112,8 @@ def instrument_claude_agent_sdk_options(
         tool_input: dict[str, Any],
         context: Any,
     ) -> Any:
-        action_attestation_id = known_action_id(getattr(context, "tool_use_id", None)) or _resolve_action_attestation_id(tracer._config)
+        provider_id = getattr(context, "tool_use_id", None)
+        action_attestation_id = known_action_id(provider_id) or _resolve_action_attestation_id(tracer._config)
         metadata = tracer._base_tool_metadata(tool_name, tool_input, action_attestation_id)
         tracer._emit(
             tool_name,
@@ -94,7 +122,7 @@ def instrument_claude_agent_sdk_options(
             metadata={**metadata, "event_phase": "pre"},
         )
         try:
-            call_args, _ = await tracer._aenforce(
+            enforcement = await tracer._aenforce(
                 tool_name,
                 tool_args=tool_input,
                 call_args=(tool_input,),
@@ -116,6 +144,7 @@ def instrument_claude_agent_sdk_options(
             )
             return PermissionResultDeny(message=exc.reason, interrupt=False)
 
+        call_args = enforcement.effective_args
         updated_input = call_args[0] if call_args and isinstance(call_args[0], dict) else tool_input
         if isinstance(updated_input, dict) and set(updated_input.keys()) == {"input"} and isinstance(updated_input.get("input"), dict):
             updated_input = updated_input["input"]
@@ -134,9 +163,13 @@ def instrument_claude_agent_sdk_options(
                 if result.updated_input is None:
                     result.updated_input = updated_input
                 tracer._session.record_tool_call(tool_name)
+                if emit_tool_lifecycle_hooks:
+                    remember_decision(provider_id, _enforcement_outcome_context(enforcement))
             return result
 
         tracer._session.record_tool_call(tool_name)
+        if emit_tool_lifecycle_hooks:
+            remember_decision(provider_id, _enforcement_outcome_context(enforcement))
         return PermissionResultAllow(updated_input=updated_input)
 
     options.can_use_tool = governed_can_use_tool
@@ -161,11 +194,16 @@ def instrument_claude_agent_sdk_options(
             _tool_use_id: str | None,
             _context: Any,
         ) -> dict[str, Any]:
+            provider_id = hook_input.get("tool_use_id") or _tool_use_id
             tracer._emit(
                 str(hook_input.get("tool_name", "")),
                 EventType.TOOL_CALL_POST,
                 str(hook_input.get("tool_response", "")),
-                metadata={**hook_metadata(hook_input, _tool_use_id), "event_phase": "post"},
+                metadata={
+                    **hook_metadata(hook_input, _tool_use_id),
+                    **take_decision(provider_id),
+                    "event_phase": "post",
+                },
             )
             return {}
 
@@ -174,11 +212,16 @@ def instrument_claude_agent_sdk_options(
             _tool_use_id: str | None,
             _context: Any,
         ) -> dict[str, Any]:
+            provider_id = hook_input.get("tool_use_id") or _tool_use_id
             tracer._emit(
                 str(hook_input.get("tool_name", "")),
                 EventType.TOOL_CALL_BLOCK,
                 str(hook_input.get("error", "tool execution failed")),
-                metadata={**hook_metadata(hook_input, _tool_use_id), "event_phase": "block"},
+                metadata={
+                    **hook_metadata(hook_input, _tool_use_id),
+                    **take_decision(provider_id),
+                    "event_phase": "block",
+                },
             )
             return {}
 

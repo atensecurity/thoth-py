@@ -8,7 +8,7 @@ import time
 from typing import Any
 import uuid
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class EnforcementMode(StrEnum):
@@ -108,6 +108,8 @@ class BehavioralEvent(BaseModel):
 
 
 class ThothConfig(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     agent_id: str
     approved_scope: list[str]
     tenant_id: str
@@ -160,6 +162,14 @@ class ThothConfig(BaseModel):
     # Optional outbound webhook URL for BLOCK/STEP_UP human explanation delivery.
     # SDK sends notifications asynchronously and never blocks tool execution.
     notification_webhook_url: str | None = None
+
+    @field_validator("enforcement_trace_id", mode="before")
+    @classmethod
+    def normalize_enforcement_trace_id(cls, value: Any) -> Any:
+        """Canonicalize configured trace IDs before clients derive correlation."""
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
 
     @property
     def resolved_api_url(self) -> str:
@@ -217,6 +227,7 @@ class EnforcementDecision(BaseModel):
     policy_references: list[str] = Field(default_factory=list)
     model_signals: list[str] = Field(default_factory=list)
     receipt: dict[str, Any] | None = None
+    terminal_receipt: dict[str, Any] | None = None
     modified_tool_args: dict[str, Any] | None = None
     modification_reason: str | None = None
     defer_reason: str | None = None
@@ -287,6 +298,8 @@ class EnforcementDecision(BaseModel):
             payload["violation_id"] = payload.get("violationId")
         if payload.get("hold_token") is None and payload.get("holdToken") is not None:
             payload["hold_token"] = payload.get("holdToken")
+        if payload.get("terminal_receipt") is None and payload.get("terminalReceipt") is not None:
+            payload["terminal_receipt"] = payload.get("terminalReceipt")
         raw = payload.get("decision")
         if not raw:
             raw = payload.get("authorization_decision")

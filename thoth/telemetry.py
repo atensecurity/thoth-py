@@ -127,6 +127,8 @@ def telemetry_event(event: BehavioralEvent) -> dict[str, Any]:
             metadata[key] = items
     if receipt := _safe_receipt(source.get("receipt")):
         metadata["receipt"] = receipt
+    if terminal_receipt := _safe_receipt(source.get("terminal_receipt")):
+        metadata["terminal_receipt"] = terminal_receipt
     if evidence := _safe_evidence(source.get("decision_evidence")):
         metadata["decision_evidence"] = evidence
     if event.tool_name:

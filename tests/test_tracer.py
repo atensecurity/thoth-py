@@ -1,15 +1,19 @@
 # tests/test_tracer.py
+import json
 import logging
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
+import respx
 
 from thoth import ThothPolicyViolation
 from thoth.emitter import SqsEmitter
 from thoth.enforcer_client import EnforcerClient
 from thoth.models import DecisionType, EnforcementDecision, EnforcementMode, EventType, ThothConfig
 from thoth.session import SessionContext
-from thoth.step_up import StepUpClient
+from thoth.step_up import StepUpClient, _coerce_hold_payload
+from thoth.telemetry import telemetry_event
 from thoth.tracer import Tracer
 
 
@@ -56,6 +60,363 @@ def test_emits_pre_and_post_events(tracer):
     assert post_event.metadata["authorization_decision"] == "ALLOW"
     assert post_event.metadata["result_type"] == "str"
     assert isinstance(post_event.metadata["duration_ms"], int)
+
+
+def test_sync_post_event_preserves_final_allow_decision_evidence(config):
+    config.enforcement_trace_id = "trace-server-001"
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    enforcer.check.return_value = EnforcementDecision(
+        decision=DecisionType.ALLOW,
+        authorization_decision="ALLOW",
+        decision_reason_code="policy_scope_allow",
+        action_classification="context_allow",
+        enforcement_trace_id="trace-server-001",
+        pack_id="engineering",
+        matched_rule_ids=["rule-safe-001"],
+        decision_evidence={
+            "decision_reason_code": "policy_scope_allow",
+            "authorization_decision": "ALLOW",
+            "policy": {"policy_id": "policy-safe-001"},
+        },
+    )
+    tracer = Tracer(
+        config=config,
+        session=SessionContext(config),
+        emitter=emitter,
+        enforcer=enforcer,
+        step_up=MagicMock(spec=StepUpClient),
+    )
+
+    assert tracer.wrap_tool("read:data", MagicMock(return_value="ok"))() == "ok"
+
+    post = emitter.emit.call_args_list[-1].args[0]
+    retained = telemetry_event(post)["metadata"]
+    assert retained["authorization_decision"] == "ALLOW"
+    assert retained["decision_reason_code"] == "policy_scope_allow"
+    assert retained["action_classification"] == "context_allow"
+    assert retained["enforcement_trace_id"] == "trace-server-001"
+    assert retained["pack_id"] == "engineering"
+    assert retained["matched_rule_ids"] == ["rule-safe-001"]
+    assert retained["decision_evidence"]["policy"]["policy_id"] == "policy-safe-001"
+
+
+@pytest.mark.asyncio
+async def test_async_post_event_preserves_final_allow_decision_evidence(config):
+    config.enforcement_trace_id = "trace-server-async"
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    enforcer.acheck = AsyncMock(
+        return_value=EnforcementDecision(
+            decision=DecisionType.STEP_UP,
+            authorization_decision="STEP_UP",
+            decision_reason_code="approval_required",
+            hold_token="hold-safe-001",
+        )
+    )
+    enforcer.aexplain = AsyncMock(return_value=None)
+    step_up = MagicMock(spec=StepUpClient)
+    step_up.await_decision = AsyncMock(
+        return_value=EnforcementDecision(
+            decision=DecisionType.ALLOW,
+            authorization_decision="ALLOW",
+            decision_reason_code="approved_by_human",
+            action_classification="context_allow",
+            enforcement_trace_id="trace-server-async",
+            matched_control_ids=["control-safe-001"],
+        )
+    )
+    tracer = Tracer(
+        config=config,
+        session=SessionContext(config),
+        emitter=emitter,
+        enforcer=enforcer,
+        step_up=step_up,
+    )
+
+    async def tool() -> str:
+        return "ok"
+
+    assert await tracer.wrap_tool("read:data", tool)() == "ok"
+
+    post = emitter.emit.call_args_list[-1].args[0]
+    retained = telemetry_event(post)["metadata"]
+    assert retained["authorization_decision"] == "ALLOW"
+    assert retained["decision_reason_code"] == "approved_by_human"
+    assert retained["action_classification"] == "context_allow"
+    assert retained["enforcement_trace_id"] == "trace-server-async"
+    assert retained["matched_control_ids"] == ["control-safe-001"]
+    step_up.await_decision.assert_awaited_once_with("hold-safe-001")
+
+
+def test_successful_post_telemetry_excludes_sensitive_decision_fields(config):
+    secret = "SYNTHETIC-POST-DECISION-SECRET"
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    enforcer.check.return_value = EnforcementDecision(
+        decision=DecisionType.ALLOW,
+        decision_reason_code="policy_scope_allow",
+        reason=secret,
+        modification_reason=secret,
+        modified_tool_args={"password": secret},
+        decision_evidence={
+            "decision_reason_code": "policy_scope_allow",
+            "secret": secret,
+        },
+        receipt={
+            "receipt_id": "receipt-safe-001",
+            "secret": secret,
+        },
+    )
+    tracer = Tracer(
+        config=config,
+        session=SessionContext(config),
+        emitter=emitter,
+        enforcer=enforcer,
+        step_up=MagicMock(spec=StepUpClient),
+    )
+
+    tracer.wrap_tool("read:data", MagicMock(return_value="ok"))(password=secret)
+
+    post = emitter.emit.call_args_list[-1].args[0]
+    retained = telemetry_event(post)
+    rendered = json.dumps(retained, sort_keys=True)
+    assert secret not in rendered
+    assert retained["metadata"]["decision_reason_code"] == "policy_scope_allow"
+    assert retained["metadata"]["receipt"]["receipt_id"] == "receipt-safe-001"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_path", [False, True], ids=["sync", "async"])
+async def test_sparse_allow_preserves_local_lifecycle_correlation(config, async_path):
+    config.enforcement_trace_id = "trace-local-001"
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    sparse = EnforcementDecision(decision=DecisionType.ALLOW)
+    enforcer.check.return_value = sparse
+    enforcer.acheck = AsyncMock(return_value=sparse)
+    tracer = Tracer(
+        config=config,
+        session=SessionContext(config),
+        emitter=emitter,
+        enforcer=enforcer,
+        step_up=MagicMock(spec=StepUpClient),
+    )
+
+    if async_path:
+
+        async def tool() -> str:
+            return "ok"
+
+        assert await tracer.wrap_tool("read:data", tool)() == "ok"
+    else:
+        assert tracer.wrap_tool("read:data", MagicMock(return_value="ok"))() == "ok"
+
+    pre, post = [call.args[0] for call in emitter.emit.call_args_list]
+    assert pre.metadata["enforcement_trace_id"] == "trace-local-001"
+    assert post.metadata["enforcement_trace_id"] == "trace-local-001"
+    assert pre.metadata["action_attestation_id"]
+    assert post.metadata["action_attestation_id"] == pre.metadata["action_attestation_id"]
+
+
+@respx.mock
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_path", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize(
+    ("configured_trace", "expected_trace"),
+    [(" trace-abc ", "trace-abc"), (" \t\n ", "session-trace-fallback")],
+    ids=["trimmed", "blank-fallback"],
+)
+async def test_normalized_trace_matches_request_server_and_lifecycle(
+    async_path,
+    configured_trace,
+    expected_trace,
+):
+    config = ThothConfig(
+        agent_id="test-agent",
+        approved_scope=["read:data"],
+        tenant_id="trantor",
+        enforcement=EnforcementMode.BLOCK,
+        api_url="https://enforcer.example",
+    )
+    config.enforcement_trace_id = configured_trace
+    captured: dict[str, str] = {}
+
+    def enforce(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        captured["trace_id"] = payload["enforcement_trace_id"]
+        return httpx.Response(
+            200,
+            json={
+                "decision": "ALLOW",
+                "enforcement_trace_id": payload["enforcement_trace_id"],
+                "action_attestation_id": payload["action_attestation_id"],
+            },
+        )
+
+    respx.post("https://enforcer.example/v1/enforce").mock(side_effect=enforce)
+    enforcer = EnforcerClient(config)
+    emitter = MagicMock(spec=SqsEmitter)
+    tracer = Tracer(
+        config=config,
+        session=SessionContext(config, session_id="session-trace-fallback"),
+        emitter=emitter,
+        enforcer=enforcer,
+        step_up=MagicMock(spec=StepUpClient),
+    )
+    try:
+        if async_path:
+
+            async def tool() -> str:
+                return "ok"
+
+            assert await tracer.wrap_tool("read:data", tool)() == "ok"
+        else:
+            assert tracer.wrap_tool("read:data", MagicMock(return_value="ok"))() == "ok"
+    finally:
+        enforcer.close()
+        await enforcer.aclose()
+
+    assert config.enforcement_trace_id == ("trace-abc" if expected_trace == "trace-abc" else None)
+    assert captured["trace_id"] == expected_trace
+    pre, post = [call.args[0] for call in emitter.emit.call_args_list]
+    assert pre.event_type == EventType.TOOL_CALL_PRE
+    assert post.event_type == EventType.TOOL_CALL_POST
+    assert pre.metadata["enforcement_trace_id"] == post.metadata["enforcement_trace_id"] == expected_trace
+    assert pre.metadata["action_attestation_id"] == post.metadata["action_attestation_id"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_path", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize(
+    ("server_action_id", "server_trace_id", "reason_code"),
+    [
+        ("action-other", None, "action_attestation_id_mismatch"),
+        (None, "trace-other", "enforcement_trace_id_mismatch"),
+    ],
+)
+async def test_contradictory_server_correlation_fails_closed(
+    config,
+    async_path,
+    server_action_id,
+    server_trace_id,
+    reason_code,
+):
+    config = ThothConfig(
+        **config.model_dump(exclude={"enforcement_trace_id"}),
+        enforcement_trace_id=" trace-local-001 ",
+    )
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    contradictory = EnforcementDecision(
+        decision=DecisionType.ALLOW,
+        action_attestation_id=server_action_id,
+        enforcement_trace_id=server_trace_id,
+    )
+    enforcer.check.return_value = contradictory
+    enforcer.acheck = AsyncMock(return_value=contradictory)
+    tracer = Tracer(
+        config=config,
+        session=SessionContext(config),
+        emitter=emitter,
+        enforcer=enforcer,
+        step_up=MagicMock(spec=StepUpClient),
+    )
+    tool = AsyncMock(return_value="must-not-run") if async_path else MagicMock(return_value="must-not-run")
+    wrapped = tracer.wrap_tool("read:data", tool)
+
+    with pytest.raises(ThothPolicyViolation) as caught:
+        if async_path:
+            await wrapped()
+        else:
+            wrapped()
+
+    tool.assert_not_called()
+    assert caught.value.decision_reason_code == reason_code
+    pre, block = [call.args[0] for call in emitter.emit.call_args_list]
+    assert pre.metadata["enforcement_trace_id"] == block.metadata["enforcement_trace_id"] == "trace-local-001"
+    assert pre.metadata["action_attestation_id"] == block.metadata["action_attestation_id"]
+    assert block.metadata["decision_reason_code"] == reason_code
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("async_path", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize("resolution", ["ALLOW", "BLOCK"])
+async def test_hold_token_resolution_preserves_initial_and_terminal_evidence(
+    config,
+    async_path,
+    resolution,
+):
+    secret = "SYNTHETIC-HOLD-RECEIPT-SECRET"
+    config.enforcement_trace_id = "trace-hold-001"
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    initial = EnforcementDecision(
+        decision=DecisionType.STEP_UP,
+        hold_token="hold-safe-001",
+        decision_reason_code="approval_required",
+        pack_id="regulated-actions",
+        decision_evidence={
+            "policy": {"policy_id": "policy-safe-001"},
+            "secret": secret,
+        },
+        receipt={"receipt_id": "receipt-initial", "signature": "sig-initial", "secret": secret},
+    )
+    terminal = _coerce_hold_payload(
+        {
+            "resolved": True,
+            "resolution": resolution,
+            "terminal_receipt": {
+                "receipt_id": "receipt-terminal",
+                "signature": "sig-terminal",
+                "hold": {"reason": secret, "resolution": resolution},
+                "secret": secret,
+            },
+        }
+    )
+    enforcer.check.return_value = initial
+    enforcer.acheck = AsyncMock(return_value=initial)
+    enforcer.explain.return_value = None
+    enforcer.aexplain = AsyncMock(return_value=None)
+    step_up = MagicMock(spec=StepUpClient)
+    step_up.wait.return_value = terminal
+    step_up.await_decision = AsyncMock(return_value=terminal)
+    tracer = Tracer(
+        config=config,
+        session=SessionContext(config),
+        emitter=emitter,
+        enforcer=enforcer,
+        step_up=step_up,
+    )
+    tool = AsyncMock(return_value="ok") if async_path else MagicMock(return_value="ok")
+    wrapped = tracer.wrap_tool("read:data", tool)
+
+    if resolution == "ALLOW":
+        result = await wrapped() if async_path else wrapped()
+        assert result == "ok"
+        tool.assert_called_once_with()
+        terminal_event = emitter.emit.call_args_list[-1].args[0]
+        assert terminal_event.event_type == EventType.TOOL_CALL_POST
+    else:
+        with pytest.raises(ThothPolicyViolation) as caught:
+            if async_path:
+                await wrapped()
+            else:
+                wrapped()
+        tool.assert_not_called()
+        assert caught.value.authorization_decision == "BLOCK"
+        terminal_event = emitter.emit.call_args_list[-1].args[0]
+        assert terminal_event.event_type == EventType.TOOL_CALL_BLOCK
+
+    retained = telemetry_event(terminal_event)["metadata"]
+    assert retained["authorization_decision"] == resolution
+    assert retained["decision_reason_code"] == "approval_required"
+    assert retained["pack_id"] == "regulated-actions"
+    assert retained["enforcement_trace_id"] == "trace-hold-001"
+    assert retained["decision_evidence"]["policy"]["policy_id"] == "policy-safe-001"
+    assert retained["receipt"]["receipt_id"] == "receipt-initial"
+    assert retained["terminal_receipt"]["receipt_id"] == "receipt-terminal"
+    assert secret not in json.dumps(retained, sort_keys=True)
 
 
 def test_decision_debug_log_omits_sensitive_reason_and_hold_token(config, caplog):
@@ -107,6 +468,7 @@ def test_enforce_includes_current_tool_in_session_history(tracer):
 
 
 def test_raises_policy_violation_on_block(config):
+    config.enforcement_trace_id = "trace-abc"
     session = SessionContext(config)
     emitter = MagicMock(spec=SqsEmitter)
     enforcer = MagicMock(spec=EnforcerClient)
@@ -302,6 +664,8 @@ def test_modify_rewrites_tool_args(config):
     step_up = MagicMock(spec=StepUpClient)
     enforcer.check.return_value = EnforcementDecision(
         decision=DecisionType.MODIFY,
+        authorization_decision="MODIFY",
+        decision_reason_code="minimum_necessary_transform",
         modified_tool_args={"input": "sanitized"},
     )
 
@@ -311,6 +675,43 @@ def test_modify_rewrites_tool_args(config):
     result = wrapped("original")
     assert result == "ok"
     tool.assert_called_once_with("sanitized")
+    post_event = emitter.emit.call_args_list[-1].args[0]
+    assert post_event.metadata["authorization_decision"] == "MODIFY"
+    assert post_event.metadata["decision_reason_code"] == "minimum_necessary_transform"
+
+
+@pytest.mark.asyncio
+async def test_async_modify_rewrites_tool_args_once_and_preserves_decision(config):
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    enforcer.acheck = AsyncMock(
+        return_value=EnforcementDecision(
+            decision=DecisionType.MODIFY,
+            authorization_decision="MODIFY",
+            decision_reason_code="minimum_necessary_transform",
+            modified_tool_args={"input": "sanitized"},
+        )
+    )
+    tracer = Tracer(
+        config=config,
+        session=SessionContext(config),
+        emitter=emitter,
+        enforcer=enforcer,
+        step_up=MagicMock(spec=StepUpClient),
+    )
+    calls: list[str] = []
+
+    async def tool(value: str) -> str:
+        calls.append(value)
+        return "ok"
+
+    result = await tracer.wrap_tool("write:slack", tool)("original")
+
+    assert result == "ok"
+    assert calls == ["sanitized"]
+    post_event = emitter.emit.call_args_list[-1].args[0]
+    assert post_event.metadata["authorization_decision"] == "MODIFY"
+    assert post_event.metadata["decision_reason_code"] == "minimum_necessary_transform"
 
 
 def test_defer_raises_policy_violation(config):
@@ -346,6 +747,44 @@ def test_observe_mode_allows_out_of_scope(config):
     result = wrapped()
     assert result == "ok"
     enforcer.check.assert_not_called()
+    post_event = emitter.emit.call_args_list[-1].args[0]
+    assert "authorization_decision" not in post_event.metadata
+    assert "decision_reason_code" not in post_event.metadata
+    assert "decision_evidence" not in post_event.metadata
+    retained = json.loads(json.dumps(telemetry_event(post_event)))
+    assert retained["enforcement_mode"] == "observe"
+    assert "authorization_decision" not in retained["metadata"]
+    assert "decision_reason_code" not in retained["metadata"]
+    assert "decision_evidence" not in retained["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_observe_mode_async_post_has_no_fabricated_decision(config):
+    config.enforcement = EnforcementMode.OBSERVE
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    tracer = Tracer(
+        config=config,
+        session=SessionContext(config),
+        emitter=emitter,
+        enforcer=enforcer,
+        step_up=MagicMock(spec=StepUpClient),
+    )
+
+    async def tool() -> str:
+        return "ok"
+
+    assert await tracer.wrap_tool("write:s3", tool)() == "ok"
+    enforcer.acheck.assert_not_called()
+    post_event = emitter.emit.call_args_list[-1].args[0]
+    assert "authorization_decision" not in post_event.metadata
+    assert "decision_reason_code" not in post_event.metadata
+    assert "decision_evidence" not in post_event.metadata
+    retained = json.loads(json.dumps(telemetry_event(post_event)))
+    assert retained["enforcement_mode"] == "observe"
+    assert "authorization_decision" not in retained["metadata"]
+    assert "decision_reason_code" not in retained["metadata"]
+    assert "decision_evidence" not in retained["metadata"]
 
 
 @pytest.mark.asyncio
