@@ -5,7 +5,6 @@ from collections.abc import Callable
 from unittest.mock import patch
 
 import pytest
-
 import thoth
 from thoth import ThothPolicyViolation
 from thoth.models import DecisionType, EnforcementDecision

@@ -1,13 +1,12 @@
 # tests/test_emitter.py
-from datetime import UTC, datetime
 import json
 import time
+from datetime import UTC, datetime
 
 import boto3
 import httpx
-from moto import mock_aws
 import pytest
-
+from moto import mock_aws
 from thoth.emitter import HttpEmitter, SqsEmitter
 from thoth.models import BehavioralEvent, EventType, SourceType
 

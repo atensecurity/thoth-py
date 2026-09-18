@@ -1,13 +1,12 @@
 """Regress wheel metadata that lets installation succeed without integrations."""
 
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 from zipfile import ZipFile
 
-from packaging.markers import default_environment
-
 from check_wheel import check_wheel
+from packaging.markers import default_environment
 
 
 class WheelContractTests(unittest.TestCase):

@@ -1,8 +1,8 @@
 """Exercise standard LangChain async-to-sync dispatch through real tools."""
 
 import asyncio
-from contextvars import ContextVar
 import json
+from contextvars import ContextVar
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -15,9 +15,8 @@ pytest.importorskip("langchain_core")
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import StructuredTool, Tool
-
-from thoth.exceptions import ThothDeferredError, ThothPolicyViolation
 from thoth.enforcer_client import EnforcerClient
+from thoth.exceptions import ThothDeferredError, ThothPolicyViolation
 from thoth.integrations.langgraph import instrument_langgraph
 from thoth.models import DecisionType, EnforcementDecision, ThothConfig
 

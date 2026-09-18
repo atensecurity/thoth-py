@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 import importlib
 import json
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
-
 from thoth.integrations.claude_agent_sdk import instrument_claude_agent_sdk_options
 from thoth.models import DecisionType, EnforcementDecision, EnforcementMode, EventType, ThothConfig
 from thoth.session import SessionContext

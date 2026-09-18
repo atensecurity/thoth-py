@@ -2,7 +2,6 @@
 import httpx
 import pytest
 import respx
-
 from thoth.models import ThothConfig
 from thoth.step_up import StepUpClient
 

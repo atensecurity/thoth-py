@@ -13,11 +13,11 @@ Optional env vars:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import os
-from typing import Any, Literal, TypedDict
 import uuid
+from dataclasses import dataclass
+from typing import Any, Literal, TypedDict
 
 try:
     import langchain  # type: ignore[import-not-found]
@@ -27,12 +27,11 @@ try:
 except Exception:
     langchain = None  # type: ignore[assignment]
 
+import thoth
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import tool
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
-
-import thoth
 from thoth import ThothPolicyViolation
 
 
@@ -94,7 +93,7 @@ def generate_clinical_note(visit_id: str, transcript: str) -> str:
 
 @tool("write_to_ehr")
 def write_to_ehr(patient_id: str, note: str, visit_id: str) -> dict[str, Any]:
-    """Persist note to EHR (sensitive PHI write operation)."""
+    """Persist note to HER (sensitive PHI write operation)."""
 
     return {
         "status": "written",
@@ -185,7 +184,7 @@ def planner_node(state: AgentState) -> dict[str, Any]:
             "step": 4,
             "messages": [
                 AIMessage(
-                    content="Attempting EHR write (sensitive).",
+                    content="Attempting HER write (sensitive).",
                     tool_calls=[
                         _tool_call(
                             call_id=f"tool-{uuid.uuid4().hex[:8]}",

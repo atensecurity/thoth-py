@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import httpx
-
 from thoth.enforcer_client import EnforcerClient
 from thoth.models import ThothConfig
 

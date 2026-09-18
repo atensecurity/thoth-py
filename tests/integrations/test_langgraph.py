@@ -13,7 +13,6 @@ from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
-
 from thoth.exceptions import ThothDeferredError, ThothPolicyViolation
 from thoth.integrations.langgraph import (
     instrument_langgraph,

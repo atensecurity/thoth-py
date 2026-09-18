@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 import respx
-
 from thoth import ThothPolicyViolation
 from thoth.emitter import SqsEmitter
 from thoth.enforcer_client import EnforcerClient
