@@ -2,6 +2,43 @@
 
 All notable changes to `atensec-thoth` are documented in this file.
 
+## 0.5.23 - 2026-09-18
+
+### Fixed
+
+- The tracer discarded the final enforcement decision after computing effective
+  tool arguments, so POST telemetry hardcoded `ALLOW` and omitted server-issued
+  reason codes and structured decision evidence. The real outcome is now
+  retained and reported.
+- A resolved `STEP_UP` no longer loses the initial policy evidence or the
+  canonical terminal receipt. Final authorization semantics are merged with the
+  initial reason, policy and receipt evidence, and the terminal receipt is
+  preserved separately.
+- A sparse server response no longer erases locally established correlation.
+  Sparse decisions bind to the local trace and action IDs.
+
+### Security
+
+- A server response whose action or trace ID contradicts the locally established
+  one now **fails closed before the tool executes**, rather than proceeding with
+  ambiguous correlation.
+
+### Added
+
+- `EnforcementDecision` and the policy exceptions gain an optional
+  `terminal_receipt` field. Existing callers are unaffected.
+- Claude Agent SDK post-success and post-failure hooks now carry decision
+  context, correlated through a bounded single-use map keyed on the provider
+  tool-use ID. The map holds at most 1024 pending entries; a reused, missing,
+  unseen or evicted ID yields empty context rather than another action's, so
+  evidence correlation fails closed without changing the authorization result.
+
+### Unchanged
+
+- Tool execution, blocking, deferral, step-up and argument-modification
+  semantics, final `MODIFY` outcomes, and current `OBSERVE` behaviour. The
+  enforcement return shape remains private to the SDK implementation.
+
 ## 0.5.22 - 2026-09-11
 
 ### Added
