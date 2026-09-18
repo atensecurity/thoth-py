@@ -93,7 +93,7 @@ def generate_clinical_note(visit_id: str, transcript: str) -> str:
 
 @tool("write_to_ehr")
 def write_to_ehr(patient_id: str, note: str, visit_id: str) -> dict[str, Any]:
-    """Persist note to HER (sensitive PHI write operation)."""
+    """Persist note to EHR (sensitive PHI write operation)."""
 
     return {
         "status": "written",
@@ -184,7 +184,7 @@ def planner_node(state: AgentState) -> dict[str, Any]:
             "step": 4,
             "messages": [
                 AIMessage(
-                    content="Attempting HER write (sensitive).",
+                    content="Attempting EHR write (sensitive).",
                     tool_calls=[
                         _tool_call(
                             call_id=f"tool-{uuid.uuid4().hex[:8]}",
