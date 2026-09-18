@@ -342,7 +342,7 @@ def parse_settings(workspace_root: Path) -> RuntimeSettings:
     if not api_key:
         raise SystemExit("Missing ATEN_API_KEY. Create one at https://start.atensecurity.com.")
 
-    tenant_id = os.getenv("THOTH_TENANT_ID", "basistheory").strip() or "basistheory"
+    tenant_id = os.getenv("THOTH_TENANT_ID", "example-vendor").strip() or "example-vendor"
     api_url = os.getenv("THOTH_API_URL", f"https://enforce.{tenant_id}.atensecurity.com").strip()
     user_id = os.getenv("THOTH_USER_ID", f"{os.getenv('USER', 'operator')}@local").strip()
     return RuntimeSettings(
