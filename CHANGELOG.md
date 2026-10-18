@@ -2,6 +2,24 @@
 
 All notable changes to `atensec-thoth` are documented in this file.
 
+## 0.5.24 - 2026-10-18
+
+### Added
+
+- Tool inventory: on instrumentation, the SDK sends each tool's name,
+  description and input-schema structure to your Thoth API in the background,
+  so Thoth can propose an effect class for an admin to confirm. Proposals are
+  advisory: they never grant execution, and only an admin's confirmation
+  changes decisions. Collection runs off the startup path, cannot raise into
+  your code, and times out after 2 seconds.
+
+### Privacy
+
+- Schema `default`, `example`, `examples`, `const` and `enum` values are
+  removed recursively before sending; parameters with those names are kept.
+  Descriptions are sent as written, so keep secrets out of tool metadata.
+- Set `THOTH_TOOL_INVENTORY=off` to disable collection.
+
 ## 0.5.23 - 2026-09-18
 
 ### Fixed
