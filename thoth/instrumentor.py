@@ -12,6 +12,7 @@ from thoth.logging_config import configure_thoth_logging_from_env
 from thoth.models import EnforcementMode, ThothConfig
 from thoth.session import SessionContext
 from thoth.step_up import StepUpClient
+from thoth.tool_inventory import publish_tool_inventory
 from thoth.tracer import Tracer
 
 
@@ -350,6 +351,7 @@ def instrument(
         enforcement_trace_id,
         event_ingest_token,
     )
+    publish_tool_inventory(agent, tenant_id=tenant_id, agent_id=agent_id, api_url=api_url, api_key=api_key)
     _wrap_agent_tools(agent, tracer)
     return agent
 
