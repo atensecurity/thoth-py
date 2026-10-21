@@ -2,6 +2,16 @@
 
 All notable changes to `atensec-thoth` are documented in this file.
 
+## Unreleased
+
+### Added
+
+- Billing errors: when the enforcer answers HTTP 402 with a `billing_error`
+  (governed actions used up, trial ended, or payment overdue), the call is
+  blocked with Thoth's message as the reason and `decision_reason_code`
+  `billing_<code>`. The message is logged once per process. `fail_open` does
+  not apply to billing errors.
+
 ## 0.5.24 - 2026-10-18
 
 ### Added

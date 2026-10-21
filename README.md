@@ -588,6 +588,12 @@ as `BLOCK` and raises `ThothPolicyViolation`. Set `fail_open=True` (or `THOTH_FA
 allow on transport/availability failures (network, 429, 5xx). Authentication/ingress failures
 remain blocked and include diagnostic hints in logs.
 
+When your workspace has used its governed actions for the period, its trial has ended, or its
+payment is overdue, the enforcer returns HTTP 402 with a `billing_error`. The SDK blocks the call
+with Thoth's message (for example, "Upgrade your plan or buy more actions at …") as the reason,
+sets `decision_reason_code` to `billing_<code>`, and logs the message once per process.
+`fail_open` does not apply: it covers outages, not billing.
+
 ---
 
 ## Handling Violations

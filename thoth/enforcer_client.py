@@ -38,6 +38,29 @@ def _is_retryable_status(status_code: int) -> bool:
     return status_code == 429 or status_code >= 500
 
 
+_billing_logged: set[str] = set()
+
+
+def _billing_decision(response: httpx.Response) -> EnforcementDecision | None:
+    """A 402 billing_error blocks with Thoth's message, whatever the fail-open
+    setting: fail-open covers outages, not an unpaid or exhausted workspace."""
+    if response.status_code != 402:
+        return None
+    try:
+        error = response.json().get("error") or {}
+    except ValueError:
+        error = {}
+    if not isinstance(error, dict) or error.get("type") != "billing_error":
+        return None
+    message = str(error.get("message") or "Thoth billing requires attention before governed actions can continue.")
+    code = str(error.get("code") or "billing_error")
+    if code not in _billing_logged:
+        # Once per process and reason, not once per tool call.
+        _billing_logged.add(code)
+        logger.error("thoth: %s", message)
+    return EnforcementDecision(decision=DecisionType.BLOCK, reason=message, decision_reason_code=f"billing_{code}")
+
+
 class EnforcerClient:
     def __init__(self, config: ThothConfig) -> None:
         configure_thoth_logging_from_env()
@@ -168,6 +191,9 @@ class EnforcerClient:
             return EnforcementDecision.model_validate(resp.json())
         except httpx.HTTPStatusError as exc:
             response = exc.response
+            billing = _billing_decision(response)
+            if billing is not None:
+                return billing
             detail = extract_http_error_detail(response)
             hint = auth_failure_hint(response.status_code, detail)
             if self._config.resolved_fail_open and _is_retryable_status(response.status_code):
@@ -228,6 +254,9 @@ class EnforcerClient:
             return EnforcementDecision.model_validate(resp.json())
         except httpx.HTTPStatusError as exc:
             response = exc.response
+            billing = _billing_decision(response)
+            if billing is not None:
+                return billing
             detail = extract_http_error_detail(response)
             hint = auth_failure_hint(response.status_code, detail)
             if self._config.resolved_fail_open and _is_retryable_status(response.status_code):
