@@ -2,6 +2,7 @@
 import httpx
 import pytest
 import respx
+
 from thoth.models import ThothConfig
 from thoth.step_up import StepUpClient
 
@@ -95,3 +96,70 @@ async def test_timeout_evidence_is_isolated_between_actions(config, first_async,
     finally:
         client.close()
         await client.aclose()
+
+
+_PENDING_WITH_LINK = {
+    "resolved": False,
+    "tool_name": "shell.exec",
+    "expires_at": "2026-10-23T16:18:13Z",
+    "approval_id": "ap_123",
+    "approval_url": "https://app.atensecurity.com/approvals?object=ap_123",
+}
+
+
+def _approval_notices(caplog):
+    return [record.getMessage() for record in caplog.records if "is waiting for approval" in record.getMessage()]
+
+
+@respx.mock
+def test_prints_the_approval_link_once_while_waiting(config, monkeypatch, caplog):
+    monkeypatch.setattr("thoth.step_up.time.sleep", lambda _seconds: None)
+    respx.get(f"{config.resolved_enforcer_url}/v1/enforce/hold/tok_link").mock(
+        side_effect=[
+            httpx.Response(200, json=_PENDING_WITH_LINK),
+            httpx.Response(200, json=_PENDING_WITH_LINK),
+            httpx.Response(200, json={"resolved": True, "resolution": "ALLOW"}),
+        ]
+    )
+
+    decision = StepUpClient(config).wait("tok_link")
+
+    assert decision.is_allow
+    assert _approval_notices(caplog) == [
+        "thoth: shell.exec is waiting for approval until 2026-10-23T16:18:13Z. Approve or deny it at https://app.atensecurity.com/approvals?object=ap_123"
+    ]
+
+
+@respx.mock
+def test_stays_quiet_without_an_approval_link(config, monkeypatch, caplog):
+    monkeypatch.setattr("thoth.step_up.time.sleep", lambda _seconds: None)
+    respx.get(f"{config.resolved_enforcer_url}/v1/enforce/hold/tok_old").mock(
+        side_effect=[
+            httpx.Response(200, json={"resolved": False, "tool_name": "shell.exec"}),
+            httpx.Response(200, json={"resolved": True, "resolution": "BLOCK"}),
+        ]
+    )
+
+    assert StepUpClient(config).wait("tok_old").is_block
+    assert _approval_notices(caplog) == []
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_async_wait_prints_the_approval_link_once(config, monkeypatch, caplog):
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr("thoth.step_up.asyncio.sleep", no_sleep)
+    respx.get(f"{config.resolved_enforcer_url}/v1/enforce/hold/tok_async").mock(
+        side_effect=[
+            httpx.Response(200, json=_PENDING_WITH_LINK),
+            httpx.Response(200, json=_PENDING_WITH_LINK),
+            httpx.Response(200, json={"resolved": True, "resolution": "BLOCK"}),
+        ]
+    )
+
+    decision = await StepUpClient(config).await_decision("tok_async")
+
+    assert decision.is_block
+    assert len(_approval_notices(caplog)) == 1

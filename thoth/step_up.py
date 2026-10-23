@@ -54,6 +54,24 @@ def _coerce_hold_payload(payload: Any) -> EnforcementDecision:
     return EnforcementDecision(decision=DecisionType.STEP_UP)
 
 
+def _approval_notice(payload: Any) -> str | None:
+    """One line telling the operator where to approve a pending hold.
+
+    The enforcer includes approval_url while the hold is pending (enforcer
+    releases from October 2026 on). Older enforcers omit it, and this stays
+    quiet rather than guessing a link.
+    """
+    if not isinstance(payload, dict) or payload.get("resolved"):
+        return None
+    url = str(payload.get("approval_url") or "").strip()
+    if not url:
+        return None
+    tool = str(payload.get("tool_name") or "").strip() or "this action"
+    expires = str(payload.get("expires_at") or "").strip()
+    until = f" until {expires}" if expires else ""
+    return f"thoth: {tool} is waiting for approval{until}. Approve or deny it at {url}"
+
+
 class StepUpClient:
     def __init__(self, config: ThothConfig) -> None:
         configure_thoth_logging_from_env()
@@ -65,11 +83,17 @@ class StepUpClient:
     def wait(self, hold_token: str) -> EnforcementDecision:
         """Synchronous poll until approved/blocked or timeout. Returns BLOCK on timeout."""
         deadline = time.monotonic() + self._config.step_up_timeout_minutes * 60
+        announced = False
         while time.monotonic() < deadline:
             try:
                 resp = self._http.get(f"/v1/enforce/hold/{hold_token}")
                 resp.raise_for_status()
-                decision = _coerce_hold_payload(resp.json())
+                payload = resp.json()
+                notice = None if announced else _approval_notice(payload)
+                if notice:
+                    logger.warning(notice)
+                    announced = True
+                decision = _coerce_hold_payload(payload)
                 if not decision.is_step_up:
                     return decision
             except Exception:
@@ -81,11 +105,17 @@ class StepUpClient:
     async def await_decision(self, hold_token: str) -> EnforcementDecision:
         """Async poll until approved/blocked or timeout. Does not block the event loop."""
         deadline = time.monotonic() + self._config.step_up_timeout_minutes * 60
+        announced = False
         while time.monotonic() < deadline:
             try:
                 resp = await self._async_http.get(f"/v1/enforce/hold/{hold_token}")
                 resp.raise_for_status()
-                decision = _coerce_hold_payload(resp.json())
+                payload = resp.json()
+                notice = None if announced else _approval_notice(payload)
+                if notice:
+                    logger.warning(notice)
+                    announced = True
+                decision = _coerce_hold_payload(payload)
                 if not decision.is_step_up:
                     return decision
             except Exception:

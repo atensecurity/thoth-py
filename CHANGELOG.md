@@ -11,6 +11,11 @@ All notable changes to `atensec-thoth` are documented in this file.
   blocked with Thoth's message as the reason and `decision_reason_code`
   `billing_<code>`. The message is logged once per process. `fail_open` does
   not apply to billing errors.
+- Approval link: while a call waits on a step-up hold, the SDK logs one warning
+  naming the tool, when the hold expires and the dashboard link where a
+  reviewer approves or denies it, instead of waiting silently. It needs an
+  enforcer that returns `approval_url` on the hold status; with an older
+  enforcer the SDK stays quiet as before.
 
 ## 0.5.24 - 2026-10-18
 
