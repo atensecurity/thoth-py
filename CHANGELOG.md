@@ -2,7 +2,7 @@
 
 All notable changes to `atensec-thoth` are documented in this file.
 
-## Unreleased
+## 0.5.25 - 2026-10-23
 
 ### Added
 
