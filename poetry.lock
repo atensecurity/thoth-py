@@ -1075,36 +1075,36 @@ typing-extensions = ">=4.13.0,<5.0.0"
 
 [[package]]
 name = "langgraph"
-version = "1.2.11"
+version = "1.2.18"
 description = "Building stateful, multi-actor applications with LLMs"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
 markers = "extra == \"langgraph\""
 files = [
-    {file = "langgraph-1.2.11-py3-none-any.whl", hash = "sha256:8bab70de7b2d00b5300fb289bcf38d8b241400f3184c1e95e8ce706fb0e8686b"},
-    {file = "langgraph-1.2.11.tar.gz", hash = "sha256:9ecfe11e50d338b34b15cf4d8a442642de103e8ae6971320efba84e4542eb363"},
+    {file = "langgraph-1.2.18-py3-none-any.whl", hash = "sha256:f430f28ea7fbc129c3cf7dc31c19c33dc27d93aeebd25c6d64fd5c1bad93d27d"},
+    {file = "langgraph-1.2.18.tar.gz", hash = "sha256:4c3e4289043ed0f99625a09990a012d7b16bb576301d8616810de7db01725f9e"},
 ]
 
 [package.dependencies]
 langchain-core = ">=1.4.7,<2"
-langgraph-checkpoint = ">=4.1.0,<5.0.0"
+langgraph-checkpoint = ">=4.3.0,<5.0.0"
 langgraph-prebuilt = ">=1.1.0,<1.2.0"
-langgraph-sdk = ">=0.4.2,<0.5.0"
+langgraph-sdk = ">=0.4.6,<0.5.0"
 pydantic = ">=2.7.4"
 xxhash = ">=3.5.0"
 
 [[package]]
 name = "langgraph-checkpoint"
-version = "4.2.0"
+version = "4.3.1"
 description = "Library with base interfaces for LangGraph checkpoint savers."
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
 markers = "extra == \"langgraph\""
 files = [
-    {file = "langgraph_checkpoint-4.2.0-py3-none-any.whl", hash = "sha256:0547fd228935a0b758865de3a3d6d7a2537c308895d0f9ab092ce9151b5da942"},
-    {file = "langgraph_checkpoint-4.2.0.tar.gz", hash = "sha256:51a593b6bee684b0818e5d6e58e28ab340c6db7794575056ce7bd1b746a84ed7"},
+    {file = "langgraph_checkpoint-4.3.1-py3-none-any.whl", hash = "sha256:215a826935c8db4d9676e79fd95943e5b3847d78604390898e1d98581cc594e5"},
+    {file = "langgraph_checkpoint-4.3.1.tar.gz", hash = "sha256:625e7c78a72b33e7c47f7e87ca051060fb90aa66f5fd551c472c08376fb669cb"},
 ]
 
 [package.dependencies]
@@ -1130,15 +1130,15 @@ langgraph-checkpoint = ">=2.1.0,<5.0.0"
 
 [[package]]
 name = "langgraph-sdk"
-version = "0.4.4"
+version = "0.4.10"
 description = "SDK for interacting with LangGraph API"
 optional = true
 python-versions = ">=3.10"
 groups = ["main"]
 markers = "extra == \"langgraph\""
 files = [
-    {file = "langgraph_sdk-0.4.4-py3-none-any.whl", hash = "sha256:39afe416c91742925e6f8a93715f566d499b36e1b636b804a4ffe3190e4f4e64"},
-    {file = "langgraph_sdk-0.4.4.tar.gz", hash = "sha256:4e651ffa09de695681579396375377bdde23bedbc8e35b070e615cbd5af7da8b"},
+    {file = "langgraph_sdk-0.4.10-py3-none-any.whl", hash = "sha256:306ede340814e79332812e3b5a8bda2587a09657c95e14e5c7af3370e06c22fe"},
+    {file = "langgraph_sdk-0.4.10.tar.gz", hash = "sha256:d8d7afd326b4df42ddc0878b7fbf53f03c3237c664c236bf5bac4ab16fc38ed9"},
 ]
 
 [package.dependencies]
@@ -1146,7 +1146,7 @@ httpx = ">=0.25.2"
 langchain-core = ">=1.4.0,<2"
 langchain-protocol = ">=0.0.15"
 orjson = ">=3.11.5"
-websockets = ">=14,<17"
+websockets = ">=14"
 
 [[package]]
 name = "langsmith"
@@ -1425,9 +1425,10 @@ voice-helpers = ["numpy (>=2.0.2)", "sounddevice (>=0.5.1)"]
 name = "opentelemetry-api"
 version = "1.45.1"
 description = "OpenTelemetry Python API"
-optional = false
+optional = true
 python-versions = ">=3.10"
 groups = ["main"]
+markers = "extra == \"claude\" or extra == \"autogen\""
 files = [
     {file = "opentelemetry_api-1.45.1-py3-none-any.whl", hash = "sha256:b31553efa588ae44bc306f863c785c5333a9ecc091248c6ee68b4b6c87fdedfb"},
     {file = "opentelemetry_api-1.45.1.tar.gz", hash = "sha256:aa38ed19bcc084ba42782a73255b3582283eced7ad6dddbd6695189e69adfb75"},
@@ -2476,15 +2477,15 @@ uvicorn = ["uvicorn (>=0.34.0)"]
 
 [[package]]
 name = "starlette"
-version = "1.9.0"
+version = "1.10.0"
 description = "The little ASGI library that shines."
 optional = true
 python-versions = ">=3.11"
 groups = ["main"]
 markers = "extra == \"claude\""
 files = [
-    {file = "starlette-1.9.0-py3-none-any.whl", hash = "sha256:fd3f159936e882d06c1108f84688f7cda2cf85fc6a592a50edbd175e882c2ddc"},
-    {file = "starlette-1.9.0.tar.gz", hash = "sha256:3d931de246ed870e35ce605974440816ef895e592f255d1396cfdf191d4c4318"},
+    {file = "starlette-1.10.0-py3-none-any.whl", hash = "sha256:478c0ab3b4ced6e82719849c118fa406f0278a3499c1a898cd15cd31bdc38ce4"},
+    {file = "starlette-1.10.0.tar.gz", hash = "sha256:b8399098d4c1e3522734f7235dc79b1fc967f96cf139c81e0fa30479e0685f9b"},
 ]
 
 [package.dependencies]
