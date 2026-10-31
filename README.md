@@ -80,7 +80,7 @@ export THOTH_API_KEY="thoth_live_..."
 export THOTH_API_URL="https://enforce.<tenant>.<apex-domain>"
 ```
 
-**3. LangChain, LangGraph, the OpenAI Agents SDK, CrewAI or Pydantic AI: one call, no tool changes.**
+**3. LangChain, LangGraph, the OpenAI Agents SDK, CrewAI, Pydantic AI or Google ADK: one call, no tool changes.**
 
 ```python
 import thoth
@@ -88,7 +88,7 @@ import thoth
 thoth.init()  # reads THOTH_AGENT_ID, THOTH_TENANT_ID, THOTH_API_URL, THOTH_API_KEY
 
 # Every LangChain tool (including those LangGraph's ToolNode runs), OpenAI
-# Agents SDK function tool, CrewAI tool and Pydantic AI tool call in the
+# Agents SDK function tool, CrewAI tool, Pydantic AI tool call and Google ADK tool in the
 # process is now checked before it runs, including tools defined before init().
 # Run each request for the user it serves:
 with thoth.acting_for("alice@example.com"):
@@ -99,7 +99,7 @@ The agent's observe or enforce mode is set in Thoth, not in code. Without
 `approved_scope`, keep the agent in observe until an admin confirms its tools:
 in enforce mode, a call with no approved scope and no risk score is held for
 approval. A refused LangChain tool raises `ThothPolicyViolation`; a refused
-OpenAI Agents SDK, CrewAI or Pydantic AI tool returns "Thoth refused this call: <reason>"
+OpenAI Agents SDK, CrewAI, Pydantic AI or Google ADK tool returns "Thoth refused this call: <reason>"
 to the model or agent, as those frameworks report tool errors. Either way the
 tool does not run. The OpenAI Agents SDK's local shell, computer and
 apply_patch tools don't run through function tools and are not covered by

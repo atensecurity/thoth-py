@@ -31,6 +31,11 @@ Frameworks governed (more follow):
   tool result. Output functions in every output mode (tool, TextOutput,
   native, prompted) are checked at _output.execute_output_function, which
   all of them call, and a refusal raises ThothPolicyViolation.
+- Google ADK tools, at run_async, which every ADK tool path ends in (the
+  normal caller, the tool thread pool and live streaming), after the
+  before-tool callbacks. It is wrapped on BaseTool, on every subclass that
+  defines its own, and on subclasses defined after init(). A refusal returns
+  "Thoth refused this call: <reason>" as the tool result.
 
 Every call is sent to Thoth before the tool runs, and the server decides:
 whether the agent observes or enforces is set there, per agent, never here.
@@ -635,9 +640,98 @@ def _install_pydantic_ai() -> Callable[[], None] | None:
     return undo
 
 
+# --- Google ADK ------------------------------------------------------------------
+
+
+def _govern_adk_run_async(original: Callable[..., Any]) -> Callable[..., Any]:
+    """The governed form of an ADK tool's run_async(*, args, tool_context)."""
+
+    @functools.wraps(original)
+    async def run_async(self: Any, *call_args: Any, args: Any = None, tool_context: Any = None, **kwargs: Any) -> Any:
+        runtime = _runtime()
+        if runtime is None:
+            return await original(self, *call_args, args=args, tool_context=tool_context, **kwargs)
+        name = getattr(self, "name", "")
+        if not isinstance(name, str) or not name or not isinstance(args, dict):
+            # Nothing Thoth can check, so the tool doesn't run.
+            return _refused("the call can't be checked, so it was not run")
+        if claim_checked_call(name, args):
+            # Already checked: a subclass calling super().run_async with the same call.
+            return await original(self, *call_args, args=args, tool_context=tool_context, **kwargs)
+        runtime.report(self)
+        tracer = runtime.tracer()
+
+        async def run(checked: Any) -> Any:
+            # Exactly the arguments Thoth checked; the tool context passes through.
+            return await original(self, *call_args, args=checked, tool_context=tool_context, **kwargs)
+
+        token = _CURRENT_SESSION.set(tracer._session)
+        try:
+            return await tracer.wrap_tool(name, run)(args)
+        except ThothPolicyViolation as exc:
+            return _refused(exc.reason)
+        finally:
+            _CURRENT_SESSION.reset(token)
+
+    setattr(run_async, _THOTH_GOVERNED, True)
+    return run_async
+
+
+def _install_google_adk() -> Callable[[], None] | None:
+    """Governs every Google ADK tool at run_async.
+
+    Every ADK tool path (the normal caller, the tool thread pool and live
+    streaming) ends in ``tool.run_async(args=..., tool_context=...)``, after
+    the before-tool callbacks, so the arguments checked are the ones run.
+    Tool classes override run_async, so it is wrapped on BaseTool, on every
+    subclass that defines its own, and on subclasses defined after init().
+    """
+    try:
+        BaseTool = importlib.import_module("google.adk.tools.base_tool").BaseTool
+    except ImportError:
+        return None
+    wrapped: list[tuple[type, Any]] = []
+
+    def wrap(cls: type) -> None:
+        original = cls.__dict__.get("run_async")
+        if original is None or getattr(original, _THOTH_GOVERNED, False):
+            return
+        wrapped.append((cls, original))
+        cls.run_async = _govern_adk_run_async(original)  # type: ignore[attr-defined]
+
+    def walk(cls: type) -> None:
+        wrap(cls)
+        for subclass in cls.__subclasses__():
+            walk(subclass)
+
+    walk(BaseTool)
+    previous_hook = BaseTool.__dict__.get("__init_subclass__")
+
+    @classmethod  # type: ignore[misc]
+    def init_subclass(cls: type, **kwargs: Any) -> None:
+        if previous_hook is not None:
+            previous_hook.__func__(cls, **kwargs)
+        else:
+            super(BaseTool, cls).__init_subclass__(**kwargs)
+        wrap(cls)
+
+    BaseTool.__init_subclass__ = init_subclass
+
+    def undo() -> None:
+        for cls, original in wrapped:
+            cls.run_async = original  # type: ignore[attr-defined]
+        if previous_hook is None:
+            del BaseTool.__init_subclass__
+        else:
+            BaseTool.__init_subclass__ = previous_hook
+
+    return undo
+
+
 _HOOKS: dict[str, Callable[[], Callable[[], None] | None]] = {
     "langchain": _install_langchain,
     "openai_agents": _install_openai_agents,
     "crewai": _install_crewai,
     "pydantic_ai": _install_pydantic_ai,
+    "google_adk": _install_google_adk,
 }

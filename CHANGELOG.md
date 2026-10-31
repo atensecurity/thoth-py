@@ -16,6 +16,13 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ### Added
 
+- `thoth.init()` now also governs Google ADK tools (`FunctionTool`, MCP
+  tools, agent tools and your own `BaseTool` subclasses, including ones
+  defined after `init()`), checked at `run_async`, where every ADK tool path
+  ends, after the before-tool callbacks, and run with exactly the arguments
+  Thoth checked. A refused call never runs, and the model gets "Thoth refused
+  this call: <reason>" as the tool result. Tested with `google-adk` 2.13.0's
+  `LlmAgent` and `InMemoryRunner`.
 - `thoth.init()` now also governs Pydantic AI tool calls (function tools and
   MCP toolsets), checked with the final validated arguments, after Pydantic
   AI's own capability hooks, and run with exactly what Thoth checked. A
