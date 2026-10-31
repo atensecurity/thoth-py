@@ -20,6 +20,11 @@ Frameworks governed (more follow):
   tools created before init(). A refused call returns "Thoth refused this
   call: <reason>" to the model, as the SDK reports tool errors. Local shell,
   computer and apply_patch tools don't run through it and are not governed.
+- CrewAI tools, at BaseTool.run/arun (and the Tool subclass @tool creates)
+  for native tool calls and CrewStructuredTool.invoke/ainvoke for the text
+  tool loop. A refusal returns "Thoth refused this call: <reason>" to the
+  agent. A result CrewAI serves from its tool cache doesn't run the tool and
+  isn't checked again.
 
 Every call is sent to Thoth before the tool runs, and the server decides:
 whether the agent observes or enforces is set there, per agent, never here.
@@ -39,6 +44,7 @@ import contextvars
 from dataclasses import dataclass, field
 import functools
 import importlib
+import inspect
 import json
 import os
 import threading
@@ -407,7 +413,125 @@ def _install_openai_agents() -> Callable[[], None] | None:
     return undo
 
 
+# --- CrewAI --------------------------------------------------------------------
+
+
+def _govern_crewai_method(original: Callable[..., Any], *, invoke: bool) -> Callable[..., Any]:
+    """A governed form of a CrewAI tool method.
+
+    ``invoke=True`` is CrewStructuredTool.invoke/ainvoke(input, config, **kwargs),
+    checked by ``input``; otherwise BaseTool.run/arun(*args, **kwargs), checked
+    by the call's arguments. A refusal returns "Thoth refused this call:
+    <reason>" to the agent, as CrewAI reports tool errors, and the tool doesn't
+    run.
+    """
+
+    def split(args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[Any, tuple[Any, ...], dict[str, Any]]:
+        """invoke's input (positional or ``input=``), and the rest of the call."""
+        if args:
+            return args[0], args[1:], kwargs
+        return kwargs.get("input"), (), {key: value for key, value in kwargs.items() if key != "input"}
+
+    def prepare(self: Any, args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[Any, str] | None:
+        runtime = _runtime()
+        name = getattr(self, "name", "")
+        if runtime is None or not isinstance(name, str) or not name:
+            return None
+        checked_args = _tool_args_from_call((split(args, kwargs)[0],), {}) if invoke else _tool_args_from_call(args, kwargs)
+        if claim_checked_call(name, checked_args):
+            return None
+        runtime.report(self)
+        return runtime.tracer(), name
+
+    if inspect.iscoroutinefunction(original):
+
+        @functools.wraps(original)
+        async def governed_async(self: Any, *args: Any, **kwargs: Any) -> Any:
+            prepared = prepare(self, args, kwargs)
+            if prepared is None:
+                return await original(self, *args, **kwargs)
+            tracer, name = prepared
+            tool_input, rest, rest_kwargs = split(args, kwargs)
+
+            async def call(*checked: Any, **checked_kwargs: Any) -> Any:
+                # Exactly what Thoth checked.
+                if invoke:
+                    return await original(self, *checked, *rest, **rest_kwargs)
+                return await original(self, *checked, **checked_kwargs)
+
+            token = _CURRENT_SESSION.set(tracer._session)
+            try:
+                if invoke:
+                    return await tracer.wrap_tool(name, call)(tool_input)
+                return await tracer.wrap_tool(name, call)(*args, **kwargs)
+            except ThothPolicyViolation as exc:
+                return _refused(exc.reason)
+            finally:
+                _CURRENT_SESSION.reset(token)
+
+        return governed_async
+
+    @functools.wraps(original)
+    def governed(self: Any, *args: Any, **kwargs: Any) -> Any:
+        prepared = prepare(self, args, kwargs)
+        if prepared is None:
+            return original(self, *args, **kwargs)
+        tracer, name = prepared
+        tool_input, rest, rest_kwargs = split(args, kwargs)
+
+        def call(*checked: Any, **checked_kwargs: Any) -> Any:
+            # Exactly what Thoth checked.
+            if invoke:
+                return original(self, *checked, *rest, **rest_kwargs)
+            return original(self, *checked, **checked_kwargs)
+
+        token = _CURRENT_SESSION.set(tracer._session)
+        try:
+            if invoke:
+                return tracer.wrap_tool(name, call)(tool_input)
+            return tracer.wrap_tool(name, call)(*args, **kwargs)
+        except ThothPolicyViolation as exc:
+            return _refused(exc.reason)
+        finally:
+            _CURRENT_SESSION.reset(token)
+
+    return governed
+
+
+def _install_crewai() -> Callable[[], None] | None:
+    """Governs CrewAI tools where agents run them: BaseTool.run/arun (and the
+    Tool subclass @tool creates, which overrides them) for native tool calls,
+    and CrewStructuredTool.invoke/ainvoke for the text-based tool loop."""
+    try:
+        base = importlib.import_module("crewai.tools.base_tool")
+        structured = importlib.import_module("crewai.tools.structured_tool")
+    except ImportError:
+        return None
+    targets = [
+        (base.BaseTool, "run", False),
+        (base.BaseTool, "arun", False),
+        (base.Tool, "run", False),
+        (base.Tool, "arun", False),
+        (structured.CrewStructuredTool, "invoke", True),
+        (structured.CrewStructuredTool, "ainvoke", True),
+    ]
+    originals = []
+    for cls, attr, invoke in targets:
+        original = cls.__dict__.get(attr)
+        if original is None:
+            continue
+        originals.append((cls, attr, original))
+        setattr(cls, attr, _govern_crewai_method(original, invoke=invoke))
+
+    def undo() -> None:
+        for cls, attr, original in originals:
+            setattr(cls, attr, original)
+
+    return undo
+
+
 _HOOKS: dict[str, Callable[[], Callable[[], None] | None]] = {
     "langchain": _install_langchain,
     "openai_agents": _install_openai_agents,
+    "crewai": _install_crewai,
 }

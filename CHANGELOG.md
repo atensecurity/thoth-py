@@ -16,6 +16,14 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ### Added
 
+- `thoth.init()` now also governs CrewAI tools, including tools defined
+  before `init()` runs: `@tool` tools and `BaseTool` subclasses, whether an
+  agent calls them natively (`tool.run`) or through CrewAI's text tool loop
+  (`CrewStructuredTool.invoke`). Each call is checked with its arguments and
+  runs with exactly what Thoth checked. A refused call never runs, and the
+  agent gets "Thoth refused this call: <reason>". A result CrewAI serves from
+  its tool cache doesn't run the tool and isn't checked again. Tested with
+  `crewai` 1.15.33.
 - `thoth.init()` now also governs OpenAI Agents SDK (`openai-agents`)
   function tools, including tools defined before `init()` runs. Each call is
   checked with the model's arguments and runs with exactly what Thoth checked;
