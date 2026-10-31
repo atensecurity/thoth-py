@@ -16,6 +16,13 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ### Added
 
+- `thoth.init()` now also governs the Claude Agent SDK: every `query()` and
+  `ClaudeSDKClient` connection gets Thoth's PreToolUse check, so each tool
+  call, including tools in `allowed_tools`, is checked before the CLI runs it,
+  without passing options through `instrument_claude_agent_sdk_options`. Your
+  own hooks still run, your options object is not changed, and options you
+  instrumented by hand are not checked twice. A refused call is denied with
+  "Thoth refused this call: <reason>". Tested with `claude-agent-sdk` 0.2.176.
 - `thoth.init()` now also governs Strands Agents tools: `@tool` functions,
   MCP tools and agents used as tools, whether the model calls them or your
   code calls `agent.tool.<name>()` directly. Each call is checked after

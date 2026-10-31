@@ -80,31 +80,42 @@ export THOTH_API_KEY="thoth_live_..."
 export THOTH_API_URL="https://enforce.<tenant>.<apex-domain>"
 ```
 
-**3. LangChain, LangGraph, the OpenAI Agents SDK, CrewAI, Pydantic AI, Google ADK, Microsoft Agent Framework or Strands Agents: one call, no tool changes.**
+**3. Supported agent frameworks: one call, no tool changes.**
 
 ```python
 import thoth
 
 thoth.init()  # reads THOTH_AGENT_ID, THOTH_TENANT_ID, THOTH_API_URL, THOTH_API_KEY
 
-# Every LangChain tool (including those LangGraph's ToolNode runs), OpenAI
-# Agents SDK function tool, CrewAI tool, Pydantic AI tool call, Google ADK tool and
-# Microsoft Agent Framework tool and Strands tool in the process is now checked before it runs, including tools defined before init().
-# Run each request for the user it serves:
+# Every tool of each supported framework in the process is now checked before
+# it runs, including tools defined before init(). Run each request for the
+# user it serves:
 with thoth.acting_for("alice@example.com"):
     graph.invoke({"messages": [("user", "Summarize Q4 orders")]})
 ```
 
+`init()` governs these frameworks, whichever are installed:
+
+- LangChain and LangGraph (including the tools LangGraph's `ToolNode` runs)
+- OpenAI Agents SDK function tools
+- CrewAI
+- Pydantic AI
+- Google ADK
+- Microsoft Agent Framework
+- Strands Agents
+- Claude Agent SDK (`query()` and `ClaudeSDKClient`, including tools in
+  `allowed_tools`)
+
 The agent's observe or enforce mode is set in Thoth, not in code. Without
 `approved_scope`, keep the agent in observe until an admin confirms its tools:
 in enforce mode, a call with no approved scope and no risk score is held for
-approval. A refused LangChain tool raises `ThothPolicyViolation`; a refused
-OpenAI Agents SDK, CrewAI, Pydantic AI, Google ADK, Microsoft Agent Framework or Strands tool returns "Thoth refused this call: <reason>"
-to the model or agent, as those frameworks report tool errors. Either way the
-tool does not run. The OpenAI Agents SDK's local shell, computer and
-apply_patch tools don't run through function tools and are not covered by
-`init()`; a result CrewAI serves from its tool cache doesn't run the tool and
-isn't checked again.
+approval. A refused LangChain tool raises `ThothPolicyViolation`; in the other
+frameworks the model or agent gets "Thoth refused this call: <reason>", as
+those frameworks report tool errors (the Claude Agent SDK denies the call with
+that reason). Either way the tool does not run. The OpenAI Agents SDK's local
+shell, computer and apply_patch tools don't run through function tools and are
+not covered by `init()`; a result CrewAI serves from its tool cache doesn't
+run the tool and isn't checked again.
 
 **Other agents: instrument the agent object.**
 

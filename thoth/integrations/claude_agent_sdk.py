@@ -250,6 +250,8 @@ def instrument_claude_agent_sdk_options(
             remember_decision(provider_id, _enforcement_outcome_context(enforcement))
         return PermissionResultAllow(updated_input=updated_input)
 
+    # Marks options already governed, so thoth.init() doesn't govern them twice.
+    governed_can_use_tool.__thoth_governed__ = True  # type: ignore[attr-defined]
     options.can_use_tool = governed_can_use_tool
 
     hooks = dict(options.hooks or {})

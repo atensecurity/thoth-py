@@ -45,6 +45,10 @@ Frameworks governed (more follow):
   call reaches (the event loop, direct agent.tool calls, the bidirectional
   loop and background tools) after hooks and tool middleware. A refusal ends
   the call with an error tool result, "Thoth refused this call: <reason>".
+- Claude Agent SDK tool calls, for every query() and ClaudeSDKClient
+  connection, with a PreToolUse hook that checks each call, including tools
+  in allowed_tools, before the CLI runs it. A refusal denies the call with
+  "Thoth refused this call: <reason>". The caller's options are not changed.
 
 Every call is sent to Thoth before the tool runs, and the server decides:
 whether the agent observes or enforces is set there, per agent, never here.
@@ -953,6 +957,81 @@ def _install_strands() -> Callable[[], None] | None:
     return undo
 
 
+# --- Claude Agent SDK ------------------------------------------------------------
+
+
+def _governed_claude_options(options: Any) -> Any:
+    """A governed copy of ClaudeAgentOptions for one query or client connection.
+
+    The caller's options are never changed: hooks are copied before Thoth's are
+    added. Options someone already instrumented by hand are left as they are.
+    """
+    runtime = _runtime()
+    if runtime is None:
+        return options
+    if options is None:
+        options = importlib.import_module("claude_agent_sdk.types").ClaudeAgentOptions()
+    if getattr(options.can_use_tool, _THOTH_GOVERNED, False):
+        return options
+    governed = dataclasses.replace(options, hooks={event: list(matchers) for event, matchers in (options.hooks or {}).items()})
+    integration = importlib.import_module("thoth.integrations.claude_agent_sdk")
+    governed = integration.instrument_claude_agent_sdk_options(governed, runtime.tracer())
+    if options.permission_prompt_tool_name:
+        # The SDK refuses can_use_tool alongside a permission prompt tool; the
+        # PreToolUse hook still checks every call.
+        governed.can_use_tool = options.can_use_tool
+    return governed
+
+
+def _install_claude_agent_sdk() -> Callable[[], None] | None:
+    """Governs every Claude Agent SDK query() and ClaudeSDKClient connection.
+
+    Both entry points hand their options to the CLI in one place:
+    InternalClient.process_query for query(), and ClaudeSDKClient._connect_inner
+    for the client. Each gets a governed copy of its options there, with the
+    PreToolUse hook that checks every tool call (including tools in
+    allowed_tools) and the governed can_use_tool, so no options need changing.
+    The tracer is the one for the user acting when the query starts or the
+    client connects.
+    """
+    try:
+        InternalClient = importlib.import_module("claude_agent_sdk._internal.client").InternalClient
+        ClaudeSDKClient = importlib.import_module("claude_agent_sdk.client").ClaudeSDKClient
+    except ImportError:
+        return None
+    process_query = InternalClient.__dict__.get("process_query")
+    connect_inner = ClaudeSDKClient.__dict__.get("_connect_inner")
+    if process_query is None or connect_inner is None or getattr(process_query, _THOTH_GOVERNED, False):
+        # An SDK version without both entry points isn't governed at all, never halfway.
+        return None
+
+    @functools.wraps(process_query)
+    async def governed_process_query(self: Any, prompt: Any, options: Any, *args: Any, **kwargs: Any) -> Any:
+        async for message in process_query(self, prompt, _governed_claude_options(options), *args, **kwargs):
+            yield message
+
+    @functools.wraps(connect_inner)
+    async def governed_connect_inner(self: Any, *args: Any, **kwargs: Any) -> Any:
+        options = self.options
+        self.options = _governed_claude_options(options)
+        try:
+            return await connect_inner(self, *args, **kwargs)
+        finally:
+            # The connection holds the governed hooks; the caller's options stay theirs.
+            self.options = options
+
+    setattr(governed_process_query, _THOTH_GOVERNED, True)
+    setattr(governed_connect_inner, _THOTH_GOVERNED, True)
+    InternalClient.process_query = governed_process_query
+    ClaudeSDKClient._connect_inner = governed_connect_inner
+
+    def undo() -> None:
+        InternalClient.process_query = process_query
+        ClaudeSDKClient._connect_inner = connect_inner
+
+    return undo
+
+
 _HOOKS: dict[str, Callable[[], Callable[[], None] | None]] = {
     "langchain": _install_langchain,
     "openai_agents": _install_openai_agents,
@@ -961,4 +1040,5 @@ _HOOKS: dict[str, Callable[[], Callable[[], None] | None]] = {
     "google_adk": _install_google_adk,
     "agent_framework": _install_agent_framework,
     "strands": _install_strands,
+    "claude_agent_sdk": _install_claude_agent_sdk,
 }
