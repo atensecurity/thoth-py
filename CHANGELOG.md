@@ -16,6 +16,12 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ### Added
 
+- `thoth.init()` now also governs Strands Agents tools: `@tool` functions,
+  MCP tools and agents used as tools, whether the model calls them or your
+  code calls `agent.tool.<name>()` directly. Each call is checked after
+  Strands' hooks and tool middleware, with exactly the input that runs. A
+  refused call never runs and ends with an error tool result, "Thoth refused
+  this call: <reason>". Tested with `strands-agents` 1.63.0.
 - `thoth.init()` now also governs Microsoft Agent Framework tools: `@tool`
   functions, agents used as tools and MCP tools, at the point every tool call
   runs, after function middleware and approval, with exactly the arguments

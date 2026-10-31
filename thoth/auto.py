@@ -41,6 +41,10 @@ Frameworks governed (more follow):
   and MCP tools), with the validated arguments after function middleware and
   approval. A refusal returns "Thoth refused this call: <reason>" as the tool
   result.
+- Strands Agents tools, at the tool executor's _run_tool, which every tool
+  call reaches (the event loop, direct agent.tool calls, the bidirectional
+  loop and background tools) after hooks and tool middleware. A refusal ends
+  the call with an error tool result, "Thoth refused this call: <reason>".
 
 Every call is sent to Thoth before the tool runs, and the server decides:
 whether the agent observes or enforces is set there, per agent, never here.
@@ -797,6 +801,86 @@ def _install_agent_framework() -> Callable[[], None] | None:
     return undo
 
 
+# --- Strands Agents --------------------------------------------------------------
+
+
+def _govern_strands_run_tool(original: Callable[..., Any]) -> Callable[..., Any]:
+    """The governed form of the Strands executor's _run_tool(ctx, extra_kwargs, tool_context)."""
+
+    @functools.wraps(original)
+    async def _run_tool(ctx: Any, *call_args: Any, **kwargs: Any) -> Any:
+        runtime = _runtime()
+        tool_use = getattr(ctx, "tool_use", None)
+        if runtime is None or getattr(ctx, "tool", None) is None:
+            # Ungoverned, or an unknown tool: nothing runs, Strands reports it.
+            async for event in original(ctx, *call_args, **kwargs):
+                yield event
+            return
+        name = tool_use.get("name") if isinstance(tool_use, dict) else None
+        args = tool_use.get("input") if isinstance(tool_use, dict) else None
+        if not isinstance(name, str) or not name or not isinstance(args, dict):
+            # Nothing Thoth can check, so the tool doesn't run.
+            yield _strands_refusal(tool_use, "the call can't be checked, so it was not run")
+            return
+        if claim_checked_call(name, args):
+            async for event in original(ctx, *call_args, **kwargs):
+                yield event
+            return
+        runtime.report(ctx.tool)
+        tracer = runtime.tracer()
+
+        async def run(checked: Any) -> Any:
+            # Exactly the input Thoth checked; ExecuteToolContext is replaced, never mutated.
+            checked_ctx = dataclasses.replace(ctx, tool_use={**tool_use, "input": checked})
+            return original(checked_ctx, *call_args, **kwargs)
+
+        token = _CURRENT_SESSION.set(tracer._session)
+        try:
+            events = await tracer.wrap_tool(name, run)(args)
+        except ThothPolicyViolation as exc:
+            yield _strands_refusal(tool_use, exc.reason)
+            return
+        finally:
+            _CURRENT_SESSION.reset(token)
+        async for event in events:
+            yield event
+
+    setattr(_run_tool, _THOTH_GOVERNED, True)
+    return _run_tool
+
+
+def _strands_refusal(tool_use: Any, reason: str) -> Any:
+    """The tool result a refused Strands call ends with, as Strands reports tool errors."""
+    ToolResultEvent = importlib.import_module("strands.types.events").ToolResultEvent
+    tool_use_id = tool_use.get("toolUseId") if isinstance(tool_use, dict) else None
+    return ToolResultEvent({"toolUseId": str(tool_use_id), "status": "error", "content": [{"text": _refused(reason)}]})
+
+
+def _install_strands() -> Callable[[], None] | None:
+    """Governs Strands Agents tools at the tool executor's _run_tool.
+
+    Every tool call (the agent's event loop, direct ``agent.tool.x()`` calls,
+    the bidirectional loop and background tools) reaches the tool through
+    ``_run_tool``, the terminal of the tool middleware chain, after
+    BeforeToolCallEvent hooks and middleware have settled the input, so the
+    input checked is the input run, for @tool functions, MCP tools and agents
+    used as tools alike.
+    """
+    try:
+        executor = importlib.import_module("strands.tools.executors._executor")
+    except ImportError:
+        return None
+    original = executor.__dict__.get("_run_tool")
+    if original is None or getattr(original, _THOTH_GOVERNED, False):
+        return None
+    executor._run_tool = _govern_strands_run_tool(original)
+
+    def undo() -> None:
+        executor._run_tool = original
+
+    return undo
+
+
 _HOOKS: dict[str, Callable[[], Callable[[], None] | None]] = {
     "langchain": _install_langchain,
     "openai_agents": _install_openai_agents,
@@ -804,4 +888,5 @@ _HOOKS: dict[str, Callable[[], Callable[[], None] | None]] = {
     "pydantic_ai": _install_pydantic_ai,
     "google_adk": _install_google_adk,
     "agent_framework": _install_agent_framework,
+    "strands": _install_strands,
 }
