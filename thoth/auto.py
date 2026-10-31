@@ -650,6 +650,63 @@ def _install_pydantic_ai() -> Callable[[], None] | None:
     return undo
 
 
+# --- Streaming tools -------------------------------------------------------------
+
+
+async def _stream_checked(
+    tracer: Tracer,
+    name: str,
+    args: dict[str, Any],
+    stream: Callable[[Any], Any],
+    result_of: Callable[[Any, Any], Any],
+) -> Any:
+    """Run a streaming tool inside its Thoth check and hand its events on as they come.
+
+    ``stream(checked)`` starts the tool with exactly the arguments Thoth
+    checked. The whole stream runs inside the checked call, in a task that
+    copies the session, so Thoth records the tool's real outcome after it ends
+    (``result_of(event, last)`` picks the result from the events). The tool and
+    the consumer move in lockstep: the tool waits until each event has been
+    handed on and the next one asked for, so events stream as they would
+    without Thoth. A refusal raises ThothPolicyViolation before any event; a
+    consumer that stops early stops the tool too.
+    """
+    events: asyncio.Queue[Any] = asyncio.Queue(maxsize=1)
+
+    async def run(checked: Any) -> Any:
+        result = None
+        async for event in stream(checked):
+            await events.put(event)
+            await events.join()
+            result = result_of(event, result)
+        return result
+
+    # The task copies the context now, so the session covers the whole run.
+    token = _CURRENT_SESSION.set(tracer._session)
+    try:
+        task = asyncio.ensure_future(tracer.wrap_tool(name, run)(args))
+    finally:
+        _CURRENT_SESSION.reset(token)
+    next_event: asyncio.Future[Any] | None = None
+    try:
+        while True:
+            next_event = asyncio.ensure_future(events.get())
+            done, _ = await asyncio.wait({next_event, task}, return_when=asyncio.FIRST_COMPLETED)
+            if next_event not in done:
+                break
+            yield next_event.result()
+            events.task_done()
+        while not events.empty():
+            yield events.get_nowait()
+            events.task_done()
+        task.result()
+    finally:
+        if next_event is not None and not next_event.done():
+            next_event.cancel()
+        if not task.done():
+            task.cancel()
+
+
 # --- Google ADK ------------------------------------------------------------------
 
 
@@ -670,6 +727,26 @@ def _govern_adk_run_async(original: Callable[..., Any]) -> Callable[..., Any]:
             return await original(self, *call_args, args=args, tool_context=tool_context, **kwargs)
         runtime.report(self)
         tracer = runtime.tracer()
+        if inspect.isasyncgenfunction(getattr(self, "func", None)):
+            # A streaming tool (ADK's own test, in the live caller): run_async hands
+            # back the stream, so the governed stream is handed back at once and the
+            # tool runs inside the check behind it.
+            async def stream(checked: Any) -> Any:
+                res = await original(self, *call_args, args=checked, tool_context=tool_context, **kwargs)
+                if inspect.isasyncgen(res):
+                    async for item in res:
+                        yield item
+                else:
+                    yield res
+
+            async def governed() -> Any:
+                try:
+                    async for item in _stream_checked(tracer, name, args, stream, lambda item, _last: item):
+                        yield item
+                except ThothPolicyViolation as exc:
+                    yield _refused(exc.reason)
+
+            return governed()
 
         async def run(checked: Any) -> Any:
             # Exactly the arguments Thoth checked; the tool context passes through.
@@ -828,50 +905,17 @@ def _govern_strands_run_tool(original: Callable[..., Any]) -> Callable[..., Any]
                 yield event
             return
         runtime.report(ctx.tool)
-        tracer = runtime.tracer()
-        # Lockstep: the tool waits until each event has been handed on and the
-        # next one asked for, so events stream as they happen, as without Thoth.
-        events: asyncio.Queue[Any] = asyncio.Queue(maxsize=1)
 
-        async def run(checked: Any) -> Any:
+        def stream(checked: Any) -> Any:
             # Exactly the input Thoth checked; ExecuteToolContext is replaced, never mutated.
-            # The tool runs to completion here, inside the check, so Thoth records its
-            # real outcome; its events are handed out as they arrive.
             checked_ctx = dataclasses.replace(ctx, tool_use={**tool_use, "input": checked})
-            result = None
-            async for event in original(checked_ctx, *call_args, **kwargs):
-                await events.put(event)
-                await events.join()
-                result = getattr(event, "tool_result", result)
-            return result
+            return original(checked_ctx, *call_args, **kwargs)
 
-        # The task copies the context now, so the session covers the whole run.
-        token = _CURRENT_SESSION.set(tracer._session)
         try:
-            task = asyncio.ensure_future(tracer.wrap_tool(name, run)(args))
-        finally:
-            _CURRENT_SESSION.reset(token)
-        try:
-            while True:
-                next_event = asyncio.ensure_future(events.get())
-                done, _ = await asyncio.wait({next_event, task}, return_when=asyncio.FIRST_COMPLETED)
-                if next_event in done:
-                    yield next_event.result()
-                    events.task_done()
-                    continue
-                next_event.cancel()
-                break
-            while not events.empty():
-                yield events.get_nowait()
-                events.task_done()
-            try:
-                task.result()
-            except ThothPolicyViolation as exc:
-                yield _strands_refusal(tool_use, exc.reason)
-        finally:
-            # A consumer that stops early (or is cancelled) stops the tool too.
-            if not task.done():
-                task.cancel()
+            async for event in _stream_checked(runtime.tracer(), name, args, stream, lambda event, last: getattr(event, "tool_result", last)):
+                yield event
+        except ThothPolicyViolation as exc:
+            yield _strands_refusal(tool_use, exc.reason)
 
     setattr(_run_tool, _THOTH_GOVERNED, True)
     return _run_tool

@@ -21,6 +21,8 @@ from google.genai import types
 
 import thoth
 from thoth import auto
+from thoth._context import _CURRENT_SESSION
+from thoth.tracer import Tracer
 
 ENV = {
     "THOTH_AGENT_ID": "trader",
@@ -157,8 +159,13 @@ def test_shutdown_restores_the_tools(server):
 async def ticker(symbol: str):
     """Stream prices for a symbol."""
     ran.append(f"ticker:{symbol}")
+    timeline.append(f"tool:start:{_CURRENT_SESSION.get() is not None}")
     yield f"{symbol} 1"
     yield f"{symbol} 2"
+    timeline.append("tool:end")
+
+
+timeline: list[str] = []
 
 
 def test_a_live_streaming_tool_is_checked_before_its_stream_starts(server):
@@ -174,5 +181,34 @@ def test_a_live_streaming_tool_is_checked_before_its_stream_starts(server):
 
     ran.clear()
     server.decisions["ticker"] = "BLOCK"
-    assert str(asyncio.run(stream())).startswith("Thoth refused this call")
+    (refusal,) = asyncio.run(stream())
+    assert refusal.startswith("Thoth refused this call")
     assert ran == []
+
+
+def test_a_streaming_tool_runs_inside_the_check_and_still_streams(server, monkeypatch):
+    original_emit = Tracer._emit
+
+    def emit(self: Tracer, tool_name: str, event_type: Any, *args: Any, **kwargs: Any) -> None:
+        timeline.append(f"emit:{getattr(event_type, 'value', event_type)}")
+        return original_emit(self, tool_name, event_type, *args, **kwargs)
+
+    monkeypatch.setattr(Tracer, "_emit", emit)
+    timeline.clear()
+    thoth.init()
+
+    async def consume() -> list[Any]:
+        streamed = []
+        res = await _call_tool_async(FunctionTool(ticker), args={"symbol": "ACME"}, tool_context=None)
+        async for item in res:
+            streamed.append(item)
+            timeline.append("consumer:got")
+        return streamed
+
+    assert asyncio.run(consume()) == ["ACME 1", "ACME 2"]
+    pre = timeline.index("emit:TOOL_CALL_PRE")
+    post = timeline.index("emit:TOOL_CALL_POST")
+    # The session covers the tool body, and Thoth records completion only after it ends.
+    assert pre < timeline.index("tool:start:True") < timeline.index("tool:end") < post
+    # Items reach the consumer while the tool is still running.
+    assert timeline.index("consumer:got") < timeline.index("tool:end")
