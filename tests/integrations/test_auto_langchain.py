@@ -176,6 +176,35 @@ def test_sessions_follow_acting_for(server):
         pass
 
 
+def test_a_session_keeps_its_history_however_many_others_run(server):
+    thoth.init()
+    with thoth.acting_for("carol@acme.test"):
+        list_orders.invoke({"account": "I"})
+        for index in range(1500):
+            with thoth.acting_for(f"user-{index}@acme.test"):
+                list_orders.invoke({"account": "J"})
+        wire_funds.invoke({"amount": 2})
+    last = server.checks[-1]
+    assert last["user_id"] == "carol@acme.test"
+    assert last["session_tool_calls"] == ["list_orders", "wire_funds"], "the session's history was not reset"
+
+
+def test_a_named_session_continues_across_blocks(server):
+    thoth.init()
+    with thoth.acting_for("dana@acme.test", session_id="conversation-7"):
+        list_orders.invoke({"account": "K"})
+    # A later request resumes the conversation; an overlapping one shares it.
+    with thoth.acting_for("dana@acme.test", session_id="conversation-7"):
+        with thoth.acting_for("dana@acme.test", session_id="conversation-7"):
+            wire_funds.invoke({"amount": 3})
+        list_orders.invoke({"account": "K2"})
+    assert server.checks[-1]["session_tool_calls"] == ["list_orders", "wire_funds", "list_orders"]
+    # Another user's session with the same ID is a different session.
+    with thoth.acting_for("erin@acme.test", session_id="conversation-7"):
+        list_orders.invoke({"account": "L"})
+    assert server.checks[-1]["session_tool_calls"] == ["list_orders"]
+
+
 def test_a_tool_already_wrapped_is_checked_once(server):
     thoth.init()
     runtime = auto._runtime()

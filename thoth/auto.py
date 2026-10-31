@@ -39,6 +39,7 @@ import threading
 from types import SimpleNamespace
 from typing import Any, Callable
 import uuid
+import weakref
 
 import httpx
 
@@ -52,14 +53,30 @@ from thoth.step_up import StepUpClient, step_up_http_clients
 from thoth.tool_inventory import publish_tool_inventory
 from thoth.tracer import Tracer
 
-# Tracers kept for recent users and sessions; each is small, the clients are shared.
-_MAX_TRACERS = 1024
+# Sessions named by the caller (acting_for(..., session_id=...)) whose block has
+# ended, kept so a later request resuming them continues their tool-call
+# history. Only these are ever dropped, oldest first; a session in use never is.
+_MAX_RESUMABLE = 10_000
 
 
-@dataclass(frozen=True)
+@dataclass(eq=False)
 class _Actor:
+    """Who governed tools act for, and the session they run in.
+
+    While its acting_for block runs, the actor holds its session (and so the
+    session's tool-call history), so the history the enforcer sees is never
+    reset mid-session. Blocks for the same user and session ID share it.
+    """
+
     user_id: str
     session_id: str
+    named: bool = False
+    tracer: Tracer | None = None
+    runtime: _Runtime | None = None
+
+    @property
+    def key(self) -> tuple[str, str]:
+        return (self.user_id, self.session_id)
 
 
 _ACTOR: contextvars.ContextVar[_Actor | None] = contextvars.ContextVar("thoth_actor", default=None)
@@ -72,30 +89,41 @@ class _Runtime:
     enforcer_http: tuple[httpx.Client, httpx.AsyncClient]
     step_up_http: tuple[httpx.Client, httpx.AsyncClient]
     default_actor: _Actor
-    tracers: OrderedDict[_Actor, Tracer] = field(default_factory=OrderedDict)
     reported: set[str] = field(default_factory=set)
     lock: threading.Lock = field(default_factory=threading.Lock)
+    # Sessions some running block holds; an entry lives exactly as long as one does.
+    live: weakref.WeakValueDictionary[tuple[str, str], Tracer] = field(default_factory=weakref.WeakValueDictionary)
+    resumable: OrderedDict[tuple[str, str], Tracer] = field(default_factory=OrderedDict)
 
     def tracer(self) -> Tracer:
         actor = _ACTOR.get() or self.default_actor
         with self.lock:
-            tracer = self.tracers.get(actor)
-            if tracer is not None:
-                self.tracers.move_to_end(actor)
-                return tracer
-            config = self.config.model_copy(update={"user_id": actor.user_id})
-            session = SessionContext(config, session_id=actor.session_id)
-            tracer = Tracer(
-                config=config,
-                session=session,
-                emitter=self.emitter,
-                enforcer=EnforcerClient(config, http=self.enforcer_http[0], async_http=self.enforcer_http[1]),
-                step_up=StepUpClient(config, http=self.step_up_http[0], async_http=self.step_up_http[1]),
-            )
-            self.tracers[actor] = tracer
-            if len(self.tracers) > _MAX_TRACERS:
-                self.tracers.popitem(last=False)
-            return tracer
+            # Found on the actor's first governed call, and again only after
+            # init() is called anew.
+            if actor.tracer is None or actor.runtime is not self:
+                tracer = self.live.get(actor.key) or self.resumable.pop(actor.key, None)
+                if tracer is None:
+                    config = self.config.model_copy(update={"user_id": actor.user_id})
+                    tracer = Tracer(
+                        config=config,
+                        session=SessionContext(config, session_id=actor.session_id),
+                        emitter=self.emitter,
+                        enforcer=EnforcerClient(config, http=self.enforcer_http[0], async_http=self.enforcer_http[1]),
+                        step_up=StepUpClient(config, http=self.step_up_http[0], async_http=self.step_up_http[1]),
+                    )
+                self.live[actor.key] = tracer
+                actor.tracer, actor.runtime = tracer, self
+            return actor.tracer
+
+    def release(self, actor: _Actor) -> None:
+        """At the end of a block: keep a named session so a later request can resume it."""
+        if not actor.named or actor.tracer is None or actor.runtime is not self:
+            return
+        with self.lock:
+            self.resumable[actor.key] = actor.tracer
+            self.resumable.move_to_end(actor.key)
+            while len(self.resumable) > _MAX_RESUMABLE:
+                self.resumable.popitem(last=False)
 
     def report(self, tool: Any) -> None:
         """Send a tool's name and schema to the inventory the first time it is seen."""
@@ -201,16 +229,21 @@ def acting_for(user_id: str, *, session_id: str | None = None) -> Iterator[str]:
 
     Use one block per request or conversation; a session ID is generated when
     none is given, and yielded. Decisions, holds and the session's history are
-    recorded against this user and session.
+    recorded against this user and session. Pass the conversation's
+    session_id to continue it in a later request: its tool-call history
+    carries over (for the 10,000 most recent sessions that have ended).
     """
     if not isinstance(user_id, str) or not user_id.strip():
         raise ValueError("acting_for() needs the user the agent acts for")
-    actor = _Actor(user_id=user_id.strip(), session_id=session_id or str(uuid.uuid4()))
+    actor = _Actor(user_id=user_id.strip(), session_id=session_id or str(uuid.uuid4()), named=session_id is not None)
     token = _ACTOR.set(actor)
     try:
         yield actor.session_id
     finally:
         _ACTOR.reset(token)
+        runtime = _runtime()
+        if runtime is not None:
+            runtime.release(actor)
 
 
 def _runtime() -> _Runtime | None:
