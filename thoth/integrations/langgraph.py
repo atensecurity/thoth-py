@@ -18,7 +18,7 @@ from time import perf_counter
 from typing import TYPE_CHECKING, Any, Callable, ParamSpec, TypeVar
 import uuid
 
-from thoth._context import _CURRENT_SESSION
+from thoth._context import _CURRENT_SESSION, governed_call
 from thoth.emitter import HttpEmitter
 from thoth.enforcer_client import EnforcerClient
 from thoth.exceptions import ThothDeferredError, ThothPolicyViolation
@@ -515,7 +515,8 @@ class _LangGraphRuntime:
                 )
                 raise
 
-            result = fn(*effective_args, **effective_kwargs)
+            with governed_call(tool_name):
+                result = fn(*effective_args, **effective_kwargs)
             self._session.record_tool_call(tool_name)
             metadata: dict[str, Any] = {
                 **self._base_tool_metadata(tool_name, tool_args, action_attestation_id),
@@ -600,7 +601,8 @@ class _LangGraphRuntime:
                 )
                 raise
 
-            result = await fn(*effective_args, **effective_kwargs)
+            with governed_call(tool_name):
+                result = await fn(*effective_args, **effective_kwargs)
             self._session.record_tool_call(tool_name)
             metadata: dict[str, Any] = {
                 **self._base_tool_metadata(tool_name, tool_args, action_attestation_id),

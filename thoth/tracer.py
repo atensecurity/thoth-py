@@ -10,6 +10,7 @@ from time import perf_counter
 from typing import Any, Callable, cast
 import uuid
 
+from thoth._context import governed_call
 from thoth.emitter import HttpEmitter, SqsEmitter
 from thoth.enforcer_client import EnforcerClient
 from thoth.exceptions import ThothPolicyViolation
@@ -365,7 +366,8 @@ class Tracer:
                         },
                     )
                     raise
-                result = await fn(*enforcement.effective_args, **enforcement.effective_kwargs)
+                with governed_call(tool_name):
+                    result = await fn(*enforcement.effective_args, **enforcement.effective_kwargs)
                 self._session.record_tool_call(tool_name)
                 decision_context = _enforcement_outcome_context(enforcement)
                 self._emit(
@@ -432,7 +434,8 @@ class Tracer:
                     },
                 )
                 raise
-            result = fn(*enforcement.effective_args, **enforcement.effective_kwargs)
+            with governed_call(tool_name):
+                result = fn(*enforcement.effective_args, **enforcement.effective_kwargs)
             self._session.record_tool_call(tool_name)
             decision_context = _enforcement_outcome_context(enforcement)
             self._emit(

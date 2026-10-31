@@ -72,13 +72,29 @@ def _approval_notice(payload: Any) -> str | None:
     return f"thoth: {tool} is waiting for approval{until}. Approve or deny it at {url}"
 
 
+def step_up_http_clients(config: ThothConfig) -> tuple[httpx.Client, httpx.AsyncClient]:
+    headers = {"Authorization": f"Bearer {config.api_key}"} if config.api_key else {}
+    return (
+        httpx.Client(base_url=config.resolved_enforcer_url, timeout=_HTTP_TIMEOUT, headers=headers),
+        httpx.AsyncClient(base_url=config.resolved_enforcer_url, timeout=_HTTP_TIMEOUT, headers=headers),
+    )
+
+
 class StepUpClient:
-    def __init__(self, config: ThothConfig) -> None:
+    def __init__(
+        self,
+        config: ThothConfig,
+        *,
+        http: httpx.Client | None = None,
+        async_http: httpx.AsyncClient | None = None,
+    ) -> None:
+        """http and async_http are shared by thoth.init() (step_up_http_clients)."""
         configure_thoth_logging_from_env()
         self._config = config
-        headers = {"Authorization": f"Bearer {config.api_key}"} if config.api_key else {}
-        self._http = httpx.Client(base_url=config.resolved_enforcer_url, timeout=_HTTP_TIMEOUT, headers=headers)
-        self._async_http = httpx.AsyncClient(base_url=config.resolved_enforcer_url, timeout=_HTTP_TIMEOUT, headers=headers)
+        if http is None or async_http is None:
+            http, async_http = step_up_http_clients(config)
+        self._http = http
+        self._async_http = async_http
 
     def wait(self, hold_token: str) -> EnforcementDecision:
         """Synchronous poll until approved/blocked or timeout. Returns BLOCK on timeout."""

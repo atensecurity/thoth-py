@@ -2,6 +2,23 @@
 
 All notable changes to `atensec-thoth` are documented in this file.
 
+## Unreleased
+
+### Added
+
+- `thoth.init()`: one call at startup governs every LangChain tool in the
+  process, including the tools LangGraph's `ToolNode` runs, with no change to
+  any tool. It reads
+  `THOTH_AGENT_ID`, `THOTH_TENANT_ID`, `THOTH_API_URL` and `THOTH_API_KEY`;
+  `approved_scope` is optional. The server's observe or enforce mode for the
+  agent applies, a refusal raises `ThothPolicyViolation` before the tool runs,
+  and each tool is reported to the tool inventory the first time it is used.
+  `thoth.shutdown()` removes the hooks.
+- `thoth.acting_for(user_id, session_id=None)`: a block in which governed
+  tools act for that user, in one session (generated when not given).
+- A tool already wrapped by `instrument()`, `instrument_toolchain()` or
+  `instrument_langgraph()` is checked once, not again by `init()`'s hook.
+
 ## 0.5.25 - 2026-10-23
 
 ### Added

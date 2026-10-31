@@ -61,15 +61,33 @@ def _billing_decision(response: httpx.Response) -> EnforcementDecision | None:
     return EnforcementDecision(decision=DecisionType.BLOCK, reason=message, decision_reason_code=f"billing_{code}")
 
 
+def enforcer_http_clients(config: ThothConfig) -> tuple[httpx.Client, httpx.AsyncClient]:
+    headers = {"x-api-key": config.api_key} if config.api_key else {}
+    # resolved_enforcer_url follows the single-URL contract and mirrors resolved_api_url.
+    enforcer_url = config.resolved_enforcer_url
+    return (
+        httpx.Client(base_url=enforcer_url, headers=headers, timeout=_TIMEOUT),
+        httpx.AsyncClient(base_url=enforcer_url, headers=headers, timeout=_TIMEOUT),
+    )
+
+
 class EnforcerClient:
-    def __init__(self, config: ThothConfig) -> None:
+    def __init__(
+        self,
+        config: ThothConfig,
+        *,
+        http: httpx.Client | None = None,
+        async_http: httpx.AsyncClient | None = None,
+    ) -> None:
+        """http and async_http share one connection pool across the clients of
+        thoth.init(), one per user and session; they must already carry the
+        key and enforcer URL (see enforcer_http_clients)."""
         configure_thoth_logging_from_env()
         self._config = config
-        headers = {"x-api-key": config.api_key} if config.api_key else {}
-        # resolved_enforcer_url follows the single-URL contract and mirrors resolved_api_url.
-        enforcer_url = config.resolved_enforcer_url
-        self._http = httpx.Client(base_url=enforcer_url, headers=headers, timeout=_TIMEOUT)
-        self._async_http = httpx.AsyncClient(base_url=enforcer_url, headers=headers, timeout=_TIMEOUT)
+        if http is None or async_http is None:
+            http, async_http = enforcer_http_clients(config)
+        self._http = http
+        self._async_http = async_http
 
     def _payload(
         self,

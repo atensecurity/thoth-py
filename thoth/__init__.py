@@ -2,6 +2,7 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from thoth._context import get_current_session
+from thoth.auto import acting_for, init, shutdown
 from thoth.client import ThothClient
 from thoth.exceptions import ThothDeferredError, ThothPolicyViolation
 from thoth.instrumentor import (
@@ -28,7 +29,9 @@ __all__ = [
     "ThothDeferredError",
     "ThothPolicyViolation",
     "__version__",
+    "acting_for",
     "get_current_session",
+    "init",
     "instrument",
     "instrument_anthropic",
     "instrument_claude_agent_sdk",
@@ -36,6 +39,7 @@ __all__ = [
     "instrument_openai",
     "instrument_tool_node",
     "instrument_toolchain",
+    "shutdown",
     "thoth_graph",
     "toolchain_function_map",
 ]

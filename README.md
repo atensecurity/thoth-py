@@ -80,7 +80,26 @@ export THOTH_API_KEY="thoth_live_..."
 export THOTH_API_URL="https://enforce.<tenant>.<apex-domain>"
 ```
 
-**3. Instrument your agent — three lines of code:**
+**3. LangChain or LangGraph: one call, no tool changes.**
+
+```python
+import thoth
+
+thoth.init()  # reads THOTH_AGENT_ID, THOTH_TENANT_ID, THOTH_API_URL, THOTH_API_KEY
+
+# Every LangChain tool in the process is now checked before it runs,
+# including the tools LangGraph's ToolNode runs. Run each request for the
+# user it serves:
+with thoth.acting_for("alice@example.com"):
+    graph.invoke({"messages": [("user", "Summarize Q4 orders")]})
+```
+
+The agent's observe or enforce mode is set in Thoth, not in code. Without
+`approved_scope`, keep the agent in observe until an admin confirms its tools:
+in enforce mode, a call with no approved scope and no risk score is held for
+approval. A refusal raises `ThothPolicyViolation` and the tool does not run.
+
+**Other agents: instrument the agent object.**
 
 ```python
 import os
@@ -223,8 +242,9 @@ result = executor.invoke({"input": "Find recent SEC filings for AAPL"})
 
 ### LangGraph
 
-For LangGraph agents, wrap tool callables directly using `Tracer.wrap_tool`. Because LangGraph
-doesn't use `AgentExecutor`, the low-level API is needed here:
+`thoth.init()` (see Quick Start) governs a LangGraph agent's tools with no other code. To
+govern one graph explicitly instead, use `thoth.instrument_langgraph(graph, ...)`. The
+low-level API below wraps each tool callable with `Tracer.wrap_tool`:
 
 ```python
 import os
