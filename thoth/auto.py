@@ -36,6 +36,11 @@ Frameworks governed (more follow):
   before-tool callbacks. It is wrapped on BaseTool, on every subclass that
   defines its own, and on subclasses defined after init(). A refusal returns
   "Thoth refused this call: <reason>" as the tool result.
+- Microsoft Agent Framework tools, at FunctionTool._invoke_function, which
+  every tool path ends in (the function-invocation loop, agents used as tools
+  and MCP tools), with the validated arguments after function middleware and
+  approval. A refusal returns "Thoth refused this call: <reason>" as the tool
+  result.
 
 Every call is sent to Thoth before the tool runs, and the server decides:
 whether the agent observes or enforces is set there, per agent, never here.
@@ -728,10 +733,75 @@ def _install_google_adk() -> Callable[[], None] | None:
     return undo
 
 
+# --- Microsoft Agent Framework ---------------------------------------------------
+
+
+def _govern_agent_framework_invoke(original: Callable[..., Any]) -> Callable[..., Any]:
+    """The governed form of FunctionTool._invoke_function(call_kwargs)."""
+
+    @functools.wraps(original)
+    async def _invoke_function(self: Any, call_kwargs: Any) -> Any:
+        runtime = _runtime()
+        if runtime is None:
+            return await original(self, call_kwargs)
+        name = getattr(self, "name", "")
+        if not isinstance(name, str) or not name or not isinstance(call_kwargs, dict):
+            # Nothing Thoth can check, so the tool doesn't run.
+            return _refused("the call can't be checked, so it was not run")
+        # The framework's invocation context is runtime state, not a tool argument.
+        context_name = getattr(self, "_context_parameter_name", None)
+        passthrough = {key: value for key, value in call_kwargs.items() if key == context_name}
+        args = {key: value for key, value in call_kwargs.items() if key != context_name}
+        if claim_checked_call(name, args):
+            return await original(self, call_kwargs)
+        runtime.report(self)
+        tracer = runtime.tracer()
+
+        async def run(checked: Any) -> Any:
+            # Exactly the arguments Thoth checked, plus the invocation context.
+            return await original(self, {**checked, **passthrough})
+
+        token = _CURRENT_SESSION.set(tracer._session)
+        try:
+            return await tracer.wrap_tool(name, run)(args)
+        except ThothPolicyViolation as exc:
+            return _refused(exc.reason)
+        finally:
+            _CURRENT_SESSION.reset(token)
+
+    setattr(_invoke_function, _THOTH_GOVERNED, True)
+    return _invoke_function
+
+
+def _install_agent_framework() -> Callable[[], None] | None:
+    """Governs Microsoft Agent Framework tools at FunctionTool._invoke_function.
+
+    Every tool path (the chat client's function-invocation loop, agents used as
+    tools, and MCP tools, which the framework builds as FunctionTools) runs
+    through FunctionTool.invoke, which calls _invoke_function with the
+    validated arguments after function middleware and the approval and
+    argument-change checks, so the arguments checked are the ones run.
+    """
+    try:
+        FunctionTool = importlib.import_module("agent_framework._tools").FunctionTool
+    except ImportError:
+        return None
+    original = FunctionTool.__dict__.get("_invoke_function")
+    if original is None or getattr(original, _THOTH_GOVERNED, False):
+        return None
+    FunctionTool._invoke_function = _govern_agent_framework_invoke(original)
+
+    def undo() -> None:
+        FunctionTool._invoke_function = original
+
+    return undo
+
+
 _HOOKS: dict[str, Callable[[], Callable[[], None] | None]] = {
     "langchain": _install_langchain,
     "openai_agents": _install_openai_agents,
     "crewai": _install_crewai,
     "pydantic_ai": _install_pydantic_ai,
     "google_adk": _install_google_adk,
+    "agent_framework": _install_agent_framework,
 }

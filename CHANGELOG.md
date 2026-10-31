@@ -16,6 +16,13 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ### Added
 
+- `thoth.init()` now also governs Microsoft Agent Framework tools: `@tool`
+  functions, agents used as tools and MCP tools, at the point every tool call
+  runs, after function middleware and approval, with exactly the arguments
+  Thoth checked. The framework's invocation context still reaches the tool and
+  is not sent to Thoth. A refused call never runs, and the model gets "Thoth
+  refused this call: <reason>" as the tool result. Tested with
+  `agent-framework-core` 1.24.0.
 - `thoth.init()` now also governs Google ADK tools (`FunctionTool`, MCP
   tools, agent tools and your own `BaseTool` subclasses, including ones
   defined after `init()`), checked at `run_async`, where every ADK tool path
