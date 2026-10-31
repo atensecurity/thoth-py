@@ -16,6 +16,14 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ### Added
 
+- `thoth.init()` now also governs MCP tool calls made with the `mcp`
+  package's `ClientSession.call_tool`, whether your code calls an MCP server
+  directly or through a framework's MCP adapter. A call a framework hook has
+  already checked (the same arguments, under the MCP tool's name or a prefixed
+  form of it, such as `github_create_issue` for `create_issue`) isn't checked
+  or counted twice; any other call is checked. A refused call is never sent to
+  the server and returns an error result, "Thoth refused this call: <reason>".
+  Tested with `mcp` 2.3.0.
 - `thoth.init()` now also governs the Claude Agent SDK: every `query()` and
   `ClaudeSDKClient` connection gets Thoth's PreToolUse check, so each tool
   call, including tools in `allowed_tools`, is checked before the CLI runs it,

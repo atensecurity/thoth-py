@@ -54,6 +54,28 @@ def claim_checked_call(tool_name: str, args: Any) -> bool:
     return True
 
 
+# Separators frameworks put between a server or toolset prefix and an MCP
+# tool's own name (github_create_issue, github-create_issue, github.create_issue).
+_MCP_PREFIX_SEPARATORS = ("_", "-", ".", ":", "/")
+
+
+def claim_checked_mcp_call(tool_name: str, args: Any) -> bool:
+    """True, once, when this MCP call is the one a framework hook already checked.
+
+    Frameworks often expose an MCP tool under a prefixed name, so the checked
+    call may be named ``<prefix><separator><tool_name>``. The arguments must be
+    identical, and it is claimed once, as with claim_checked_call (owner
+    decision, 31 October 2026: a prefixed-name match, not a name-blind one).
+    """
+    call = _CHECKED_CALL.get()
+    if call is None or call.claimed or call.args != _canonical(args if args is not None else {}):
+        return False
+    if call.name != tool_name and not any(call.name.endswith(separator + tool_name) for separator in _MCP_PREFIX_SEPARATORS):
+        return False
+    call.claimed = True
+    return True
+
+
 def get_current_session() -> SessionContext | None:
     """Return the active Thoth session for the current async context."""
     return _CURRENT_SESSION.get()

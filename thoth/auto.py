@@ -49,6 +49,10 @@ Frameworks governed (more follow):
   connection, with a PreToolUse hook that checks each call, including tools
   in allowed_tools, before the CLI runs it. A refusal denies the call with
   "Thoth refused this call: <reason>". The caller's options are not changed.
+- MCP tool calls made with ClientSession.call_tool, directly or through a
+  framework's MCP adapter. A call a framework hook already checked (the same
+  arguments, under the MCP tool's name or a prefixed form of it) isn't checked
+  twice. A refusal returns an error CallToolResult and nothing is sent.
 
 Every call is sent to Thoth before the tool runs, and the server decides:
 whether the agent observes or enforces is set there, per agent, never here.
@@ -81,7 +85,7 @@ import weakref
 
 import httpx
 
-from thoth._context import _CURRENT_SESSION, claim_checked_call
+from thoth._context import _CURRENT_SESSION, claim_checked_call, claim_checked_mcp_call
 from thoth.emitter import HttpEmitter
 from thoth.enforcer_client import EnforcerClient, enforcer_http_clients
 from thoth.exceptions import ThothPolicyViolation
@@ -1032,6 +1036,68 @@ def _install_claude_agent_sdk() -> Callable[[], None] | None:
     return undo
 
 
+# --- MCP client ------------------------------------------------------------------
+
+
+def _mcp_refusal(reason: str) -> Any:
+    """A refused MCP call's result, as MCP servers report tool errors."""
+    types = importlib.import_module("mcp.types")
+    return types.CallToolResult(content=[types.TextContent(type="text", text=_refused(reason))], is_error=True)
+
+
+def _install_mcp_client() -> Callable[[], None] | None:
+    """Governs every MCP tools/call made with ClientSession.call_tool.
+
+    That covers apps calling MCP servers directly, ClientSessionGroup, and the
+    MCP adapters of frameworks. A call a framework hook already checked (the
+    same arguments, under the MCP tool's name or a prefixed form of it) isn't
+    checked again; any other call is. A refusal returns an error
+    CallToolResult, "Thoth refused this call: <reason>", and nothing is sent
+    to the server.
+    """
+    try:
+        ClientSession = importlib.import_module("mcp.client.session").ClientSession
+    except ImportError:
+        return None
+    original = ClientSession.__dict__.get("call_tool")
+    if original is None or getattr(original, _THOTH_GOVERNED, False):
+        return None
+
+    @functools.wraps(original)
+    async def call_tool(self: Any, name: Any, arguments: Any = None, *args: Any, **kwargs: Any) -> Any:
+        runtime = _runtime()
+        if runtime is None:
+            return await original(self, name, arguments, *args, **kwargs)
+        checked_args = {} if arguments is None else arguments
+        if not isinstance(name, str) or not name or not isinstance(checked_args, dict):
+            # Nothing Thoth can check, so nothing is sent.
+            return _mcp_refusal("the call can't be checked, so it was not run")
+        if claim_checked_mcp_call(name, checked_args):
+            return await original(self, name, arguments, *args, **kwargs)
+        runtime.report(SimpleNamespace(name=name, description=""))
+        tracer = runtime.tracer()
+
+        async def run(checked: Any) -> Any:
+            # Exactly the arguments Thoth checked are sent to the server.
+            return await original(self, name, checked, *args, **kwargs)
+
+        token = _CURRENT_SESSION.set(tracer._session)
+        try:
+            return await tracer.wrap_tool(name, run)(checked_args)
+        except ThothPolicyViolation as exc:
+            return _mcp_refusal(exc.reason)
+        finally:
+            _CURRENT_SESSION.reset(token)
+
+    setattr(call_tool, _THOTH_GOVERNED, True)
+    ClientSession.call_tool = call_tool
+
+    def undo() -> None:
+        ClientSession.call_tool = original
+
+    return undo
+
+
 _HOOKS: dict[str, Callable[[], Callable[[], None] | None]] = {
     "langchain": _install_langchain,
     "openai_agents": _install_openai_agents,
@@ -1041,4 +1107,5 @@ _HOOKS: dict[str, Callable[[], Callable[[], None] | None]] = {
     "agent_framework": _install_agent_framework,
     "strands": _install_strands,
     "claude_agent_sdk": _install_claude_agent_sdk,
+    "mcp_client": _install_mcp_client,
 }

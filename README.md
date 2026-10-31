@@ -105,6 +105,9 @@ with thoth.acting_for("alice@example.com"):
 - Strands Agents
 - Claude Agent SDK (`query()` and `ClaudeSDKClient`, including tools in
   `allowed_tools`)
+- MCP tool calls made with `mcp`'s `ClientSession.call_tool`, directly or
+  through a framework's MCP adapter (a call a framework already checked isn't
+  checked twice)
 
 The agent's observe or enforce mode is set in Thoth, not in code. Without
 `approved_scope`, keep the agent in observe until an admin confirms its tools:
