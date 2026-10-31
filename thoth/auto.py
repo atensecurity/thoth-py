@@ -57,6 +57,7 @@ with no risk score and no approved scope is held for approval.
 
 from __future__ import annotations
 
+import asyncio
 from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -828,22 +829,49 @@ def _govern_strands_run_tool(original: Callable[..., Any]) -> Callable[..., Any]
             return
         runtime.report(ctx.tool)
         tracer = runtime.tracer()
+        # Lockstep: the tool waits until each event has been handed on and the
+        # next one asked for, so events stream as they happen, as without Thoth.
+        events: asyncio.Queue[Any] = asyncio.Queue(maxsize=1)
 
         async def run(checked: Any) -> Any:
             # Exactly the input Thoth checked; ExecuteToolContext is replaced, never mutated.
+            # The tool runs to completion here, inside the check, so Thoth records its
+            # real outcome; its events are handed out as they arrive.
             checked_ctx = dataclasses.replace(ctx, tool_use={**tool_use, "input": checked})
-            return original(checked_ctx, *call_args, **kwargs)
+            result = None
+            async for event in original(checked_ctx, *call_args, **kwargs):
+                await events.put(event)
+                await events.join()
+                result = getattr(event, "tool_result", result)
+            return result
 
+        # The task copies the context now, so the session covers the whole run.
         token = _CURRENT_SESSION.set(tracer._session)
         try:
-            events = await tracer.wrap_tool(name, run)(args)
-        except ThothPolicyViolation as exc:
-            yield _strands_refusal(tool_use, exc.reason)
-            return
+            task = asyncio.ensure_future(tracer.wrap_tool(name, run)(args))
         finally:
             _CURRENT_SESSION.reset(token)
-        async for event in events:
-            yield event
+        try:
+            while True:
+                next_event = asyncio.ensure_future(events.get())
+                done, _ = await asyncio.wait({next_event, task}, return_when=asyncio.FIRST_COMPLETED)
+                if next_event in done:
+                    yield next_event.result()
+                    events.task_done()
+                    continue
+                next_event.cancel()
+                break
+            while not events.empty():
+                yield events.get_nowait()
+                events.task_done()
+            try:
+                task.result()
+            except ThothPolicyViolation as exc:
+                yield _strands_refusal(tool_use, exc.reason)
+        finally:
+            # A consumer that stops early (or is cancelled) stops the tool too.
+            if not task.done():
+                task.cancel()
 
     setattr(_run_tool, _THOTH_GOVERNED, True)
     return _run_tool

@@ -1,5 +1,6 @@
 """thoth.init(): every Strands Agents tool governed, with no per-tool code."""
 
+import asyncio
 import json
 from typing import Any
 from unittest.mock import MagicMock
@@ -14,6 +15,8 @@ from strands.models.model import Model
 
 import thoth
 from thoth import auto
+from thoth._context import _CURRENT_SESSION
+from thoth.tracer import Tracer
 
 ENV = {
     "THOTH_AGENT_ID": "trader",
@@ -155,6 +158,49 @@ def test_an_agent_used_as_a_tool_is_checked_and_so_are_its_tools(server):
     assert "Thoth refused this call" in final
     assert ran == []
     assert [check["tool_name"] for check in server.checks] == ["ask_analyst"]
+
+
+@tool
+async def ticker(symbol: str):
+    """Stream prices for a symbol."""
+    timeline.append(f"tool:start:{_CURRENT_SESSION.get() is not None}")
+    yield f"{symbol} 1"
+    yield f"{symbol} 2"
+    timeline.append("tool:end")
+    yield f"{symbol} closed"
+
+
+timeline: list[str] = []
+
+
+def test_the_tool_runs_inside_the_check_and_its_stream_still_streams(server, monkeypatch):
+    original_emit = Tracer._emit
+
+    def emit(self: Tracer, tool_name: str, event_type: Any, *args: Any, **kwargs: Any) -> None:
+        timeline.append(f"emit:{getattr(event_type, 'value', event_type)}")
+        return original_emit(self, tool_name, event_type, *args, **kwargs)
+
+    monkeypatch.setattr(Tracer, "_emit", emit)
+    timeline.clear()
+    thoth.init()
+    agent = Agent(model=CallingModel("ticker", {"symbol": "ACME"}), tools=[ticker], callback_handler=None)
+
+    async def consume() -> list[Any]:
+        streamed = []
+        async for event in agent.stream_async("go"):
+            if "tool_stream_event" in event:
+                streamed.append(event["tool_stream_event"]["data"])
+                timeline.append("consumer:got")
+        return streamed
+
+    streamed = asyncio.run(consume())
+    assert streamed == ["ACME 1", "ACME 2", "ACME closed"]
+    pre = timeline.index("emit:TOOL_CALL_PRE")
+    post = timeline.index("emit:TOOL_CALL_POST")
+    # The session covers the tool body, and Thoth records completion only after it ends.
+    assert pre < timeline.index("tool:start:True") < timeline.index("tool:end") < post
+    # Events reach the consumer while the tool is still running.
+    assert timeline.index("consumer:got") < timeline.index("tool:end")
 
 
 def test_shutdown_restores_the_tools(server):
