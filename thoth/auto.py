@@ -25,6 +25,12 @@ Frameworks governed (more follow):
   tool loop. A refusal returns "Thoth refused this call: <reason>" to the
   agent. A result CrewAI serves from its tool cache doesn't run the tool and
   isn't checked again.
+- Pydantic AI tool calls, at ToolManager._raw_execute, with the final
+  validated arguments after Pydantic AI's own hooks, for function tools and
+  MCP toolsets. A refusal returns "Thoth refused this call: <reason>" as the
+  tool result. Output functions in every output mode (tool, TextOutput,
+  native, prompted) are checked at _output.execute_output_function, which
+  all of them call, and a refusal raises ThothPolicyViolation.
 
 Every call is sent to Thoth before the tool runs, and the server decides:
 whether the agent observes or enforces is set there, per agent, never here.
@@ -41,6 +47,7 @@ from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
 import contextvars
+import dataclasses
 from dataclasses import dataclass, field
 import functools
 import importlib
@@ -530,8 +537,107 @@ def _install_crewai() -> Callable[[], None] | None:
     return undo
 
 
+# --- Pydantic AI -------------------------------------------------------------------
+
+
+def _pydantic_ai_call(validated: Any) -> tuple[str, Any, Any]:
+    """A validated Pydantic AI call's tool name, arguments and definition."""
+    name = getattr(getattr(validated, "call", None), "tool_name", "")
+    tool_def = getattr(getattr(validated, "tool", None), "tool_def", None)
+    return name if isinstance(name, str) else "", getattr(validated, "validated_args", None), tool_def
+
+
+async def _govern_pydantic_ai_call(validated: Any, run: Callable[[Any], Any]) -> Any:
+    """Check a validated Pydantic AI call with Thoth, then run it with exactly
+    the arguments checked. Raises ThothPolicyViolation when refused, or when
+    the call can't be checked (no name, or arguments that aren't a dict)."""
+    runtime = _runtime()
+    assert runtime is not None
+    name, tool_args, tool_def = _pydantic_ai_call(validated)
+    if not name or not isinstance(tool_args, dict):
+        raise ThothPolicyViolation(name or "unknown", "the call can't be checked, so it was not run")
+    if claim_checked_call(name, tool_args):
+        return await run(tool_args)
+    runtime.report(SimpleNamespace(name=name, description=getattr(tool_def, "description", "") or ""))
+    tracer = runtime.tracer()
+    token = _CURRENT_SESSION.set(tracer._session)
+    try:
+        return await tracer.wrap_tool(name, run)(tool_args)
+    finally:
+        _CURRENT_SESSION.reset(token)
+
+
+def _install_pydantic_ai() -> Callable[[], None] | None:
+    """Governs Pydantic AI tool calls, and output functions.
+
+    Tool calls are checked at ToolManager._raw_execute, where Pydantic AI hands
+    a call's final, validated arguments to ``toolset.call_tool`` after its own
+    capability hooks, for function tools and MCP toolsets alike. A refusal is
+    returned to the model as the tool result.
+
+    Output functions (``output_type=some_function``, ``TextOutput(fn)``,
+    native and prompted outputs) don't run through _raw_execute. Every output
+    mode calls them through one function, ``_output.execute_output_function``,
+    so that is where they are checked, by the function's name and arguments.
+    A refusal raises ThothPolicyViolation: text in its place would become the
+    agent's typed final answer. Plain schema outputs call no function of yours.
+    """
+    try:
+        ToolManager = importlib.import_module("pydantic_ai.tool_manager").ToolManager
+        output_module = importlib.import_module("pydantic_ai._output")
+    except ImportError:
+        return None
+    original_raw = ToolManager.__dict__.get("_raw_execute")
+    original_output = getattr(output_module, "execute_output_function", None)
+    if original_raw is None or original_output is None:
+        return None
+
+    @functools.wraps(original_raw)
+    async def raw_execute(self: Any, validated: Any, *args: Any, **kwargs: Any) -> Any:
+        if _runtime() is None:
+            return await original_raw(self, validated, *args, **kwargs)
+
+        async def run(checked: Any) -> Any:
+            # Exactly the arguments Thoth checked.
+            return await original_raw(self, dataclasses.replace(validated, validated_args=checked), *args, **kwargs)
+
+        try:
+            return await _govern_pydantic_ai_call(validated, run)
+        except ThothPolicyViolation as exc:
+            # The tool did not run; the model gets the refusal as the result.
+            return _refused(exc.reason)
+
+    @functools.wraps(original_output)
+    async def execute_output_function(function_schema: Any, *, args: Any, **kwargs: Any) -> Any:
+        if _runtime() is None:
+            return await original_output(function_schema, args=args, **kwargs)
+        function = getattr(function_schema, "function", None)
+        name = getattr(function, "__name__", "") or "output_function"
+        call = SimpleNamespace(
+            call=SimpleNamespace(tool_name=name),
+            tool=SimpleNamespace(tool_def=SimpleNamespace(description=getattr(function, "__doc__", "") or "")),
+            validated_args=args,
+        )
+
+        async def run(checked: Any) -> Any:
+            # Exactly the arguments Thoth checked.
+            return await original_output(function_schema, args=checked, **kwargs)
+
+        return await _govern_pydantic_ai_call(call, run)
+
+    ToolManager._raw_execute = raw_execute
+    output_module.execute_output_function = execute_output_function
+
+    def undo() -> None:
+        ToolManager._raw_execute = original_raw
+        output_module.execute_output_function = original_output
+
+    return undo
+
+
 _HOOKS: dict[str, Callable[[], Callable[[], None] | None]] = {
     "langchain": _install_langchain,
     "openai_agents": _install_openai_agents,
     "crewai": _install_crewai,
+    "pydantic_ai": _install_pydantic_ai,
 }

@@ -16,6 +16,17 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ### Added
 
+- `thoth.init()` now also governs Pydantic AI tool calls (function tools and
+  MCP toolsets), checked with the final validated arguments, after Pydantic
+  AI's own capability hooks, and run with exactly what Thoth checked. A
+  refused call never runs, and the model gets "Thoth refused this call:
+  <reason>" as the tool result; a call that can't be checked is refused.
+  Output functions are checked before they run in every output mode (tool,
+  `TextOutput`, native and prompted), by the function's name and arguments,
+  and a refusal raises `ThothPolicyViolation`, since text in its place would
+  become the agent's typed final answer; plain schema outputs call no
+  function of yours. Tested with `pydantic-ai-slim` 2.64.0's `Agent`
+  and `FunctionModel`.
 - `thoth.init()` now also governs CrewAI tools, including tools defined
   before `init()` runs: `@tool` tools and `BaseTool` subclasses, whether an
   agent calls them natively (`tool.run`) or through CrewAI's text tool loop
