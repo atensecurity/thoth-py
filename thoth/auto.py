@@ -43,7 +43,7 @@ import weakref
 
 import httpx
 
-from thoth._context import _CURRENT_SESSION, already_governed
+from thoth._context import _CURRENT_SESSION, claim_checked_call
 from thoth.emitter import HttpEmitter
 from thoth.enforcer_client import EnforcerClient, enforcer_http_clients
 from thoth.logging_config import configure_thoth_logging_from_env
@@ -51,7 +51,7 @@ from thoth.models import EnforcementMode, ThothConfig
 from thoth.session import SessionContext
 from thoth.step_up import StepUpClient, step_up_http_clients
 from thoth.tool_inventory import publish_tool_inventory
-from thoth.tracer import Tracer
+from thoth.tracer import Tracer, _tool_args_from_call
 
 # Sessions named by the caller (acting_for(..., session_id=...)) whose block has
 # ended, kept so a later request resuming them continues their tool-call
@@ -265,7 +265,7 @@ def _install_langchain() -> Callable[[], None] | None:
     def run(self: Any, tool_input: Any, *args: Any, **kwargs: Any) -> Any:
         runtime = _runtime()
         name = getattr(self, "name", "")
-        if runtime is None or not isinstance(name, str) or not name or already_governed(name):
+        if runtime is None or not isinstance(name, str) or not name or claim_checked_call(name, _tool_args_from_call((tool_input,), {})):
             return original_run(self, tool_input, *args, **kwargs)
         runtime.report(self)
         tracer = runtime.tracer()
@@ -279,7 +279,7 @@ def _install_langchain() -> Callable[[], None] | None:
     async def arun(self: Any, tool_input: Any, *args: Any, **kwargs: Any) -> Any:
         runtime = _runtime()
         name = getattr(self, "name", "")
-        if runtime is None or not isinstance(name, str) or not name or already_governed(name):
+        if runtime is None or not isinstance(name, str) or not name or claim_checked_call(name, _tool_args_from_call((tool_input,), {})):
             return await original_arun(self, tool_input, *args, **kwargs)
         runtime.report(self)
         tracer = runtime.tracer()

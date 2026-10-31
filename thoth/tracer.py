@@ -366,7 +366,7 @@ class Tracer:
                         },
                     )
                     raise
-                with governed_call(tool_name):
+                with governed_call(tool_name, _tool_args_from_call(enforcement.effective_args, enforcement.effective_kwargs)):
                     result = await fn(*enforcement.effective_args, **enforcement.effective_kwargs)
                 self._session.record_tool_call(tool_name)
                 decision_context = _enforcement_outcome_context(enforcement)
@@ -434,7 +434,7 @@ class Tracer:
                     },
                 )
                 raise
-            with governed_call(tool_name):
+            with governed_call(tool_name, _tool_args_from_call(enforcement.effective_args, enforcement.effective_kwargs)):
                 result = fn(*enforcement.effective_args, **enforcement.effective_kwargs)
             self._session.record_tool_call(tool_name)
             decision_context = _enforcement_outcome_context(enforcement)

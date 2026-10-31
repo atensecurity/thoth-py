@@ -213,6 +213,29 @@ def test_a_tool_already_wrapped_is_checked_once(server):
     assert len(server.checks) == 1
 
 
+def test_only_the_exact_checked_call_skips_the_hook(server):
+    server.decisions["wire_funds"] = "BLOCK"
+    thoth.init()
+
+    def framework_tool(args):
+        # The checked call, the same tool for another account, a repeat, and a refused tool.
+        list_orders.invoke(args)
+        list_orders.invoke({"account": "OTHER"})
+        list_orders.invoke(args)
+        return wire_funds.invoke({"amount": 1})
+
+    wrapped = auto._runtime().tracer().wrap_tool("list_orders", framework_tool)
+    with pytest.raises(ThothPolicyViolation):
+        wrapped({"account": "M"})
+    assert ran == ["list_orders:M", "list_orders:OTHER", "list_orders:M"]
+    assert [check["tool_args"] for check in server.checks] == [
+        {"account": "M"},
+        {"account": "OTHER"},
+        {"account": "M"},
+        {"amount": 1},
+    ]
+
+
 def test_each_tool_is_reported_to_the_inventory_once(server):
     thoth.init()
     list_orders.invoke({"account": "E"})

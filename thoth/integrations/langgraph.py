@@ -515,7 +515,7 @@ class _LangGraphRuntime:
                 )
                 raise
 
-            with governed_call(tool_name):
+            with governed_call(tool_name, _tool_args_from_call(effective_args, effective_kwargs)):
                 result = fn(*effective_args, **effective_kwargs)
             self._session.record_tool_call(tool_name)
             metadata: dict[str, Any] = {
@@ -601,7 +601,7 @@ class _LangGraphRuntime:
                 )
                 raise
 
-            with governed_call(tool_name):
+            with governed_call(tool_name, _tool_args_from_call(effective_args, effective_kwargs)):
                 result = await fn(*effective_args, **effective_kwargs)
             self._session.record_tool_call(tool_name)
             metadata: dict[str, Any] = {
