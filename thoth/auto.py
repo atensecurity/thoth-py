@@ -12,9 +12,14 @@ passed per call::
     with thoth.acting_for(request.user.email):
         graph.invoke(...)
 
-Frameworks governed (more follow): LangChain tools, at BaseTool.run and
-BaseTool.arun, which every tool's invoke goes through, including the tools
-LangGraph's ToolNode runs.
+Frameworks governed (more follow):
+
+- LangChain tools, at BaseTool.run and BaseTool.arun, which every tool's
+  invoke goes through, including the tools LangGraph's ToolNode runs.
+- OpenAI Agents SDK function tools, at FunctionTool.on_invoke_tool, including
+  tools created before init(). A refused call returns "Thoth refused this
+  call: <reason>" to the model, as the SDK reports tool errors. Local shell,
+  computer and apply_patch tools don't run through it and are not governed.
 
 Every call is sent to Thoth before the tool runs, and the server decides:
 whether the agent observes or enforces is set there, per agent, never here.
@@ -34,6 +39,7 @@ import contextvars
 from dataclasses import dataclass, field
 import functools
 import importlib
+import json
 import os
 import threading
 from types import SimpleNamespace
@@ -46,6 +52,7 @@ import httpx
 from thoth._context import _CURRENT_SESSION, claim_checked_call
 from thoth.emitter import HttpEmitter
 from thoth.enforcer_client import EnforcerClient, enforcer_http_clients
+from thoth.exceptions import ThothPolicyViolation
 from thoth.logging_config import configure_thoth_logging_from_env
 from thoth.models import EnforcementMode, ThothConfig
 from thoth.session import SessionContext
@@ -303,6 +310,104 @@ def _install_langchain() -> Callable[[], None] | None:
     return undo
 
 
+# --- OpenAI Agents SDK (openai-agents) ----------------------------------------
+
+_THOTH_GOVERNED = "__thoth_governed__"
+_MISSING = object()
+
+
+def _refused(reason: str) -> str:
+    # As the SDK reports a tool's own errors: the model is told and the run
+    # continues. The tool did not run, and Thoth recorded the refusal.
+    return f"Thoth refused this call: {reason}"
+
+
+def _govern_openai_agents_tool(tool: Any, raw: Callable[..., Any]) -> Callable[..., Any]:
+    """The governed form of one FunctionTool's on_invoke_tool(ctx, input_json)."""
+
+    async def on_invoke_tool(ctx: Any, input_json: str) -> Any:
+        runtime = _runtime()
+        name = getattr(tool, "name", "")
+        try:
+            parsed = json.loads(input_json) if input_json else {}
+        except (TypeError, ValueError):
+            parsed = None
+        if runtime is None or not isinstance(name, str) or not name:
+            return await raw(ctx, input_json)
+        if not isinstance(parsed, dict):
+            # Nothing Thoth can check, so the tool doesn't run.
+            return _refused("the arguments aren't a JSON object, so they can't be checked")
+        if claim_checked_call(name, parsed):
+            return await raw(ctx, input_json)
+        runtime.report(tool)
+        tracer = runtime.tracer()
+
+        async def call(checked: Any) -> Any:
+            # Exactly what Thoth checked, never the raw input.
+            return await raw(ctx, json.dumps(checked))
+
+        token = _CURRENT_SESSION.set(tracer._session)
+        try:
+            return await tracer.wrap_tool(name, call)(parsed)
+        except ThothPolicyViolation as exc:
+            return _refused(exc.reason)
+        finally:
+            _CURRENT_SESSION.reset(token)
+
+    setattr(on_invoke_tool, _THOTH_GOVERNED, True)
+    return on_invoke_tool
+
+
+def _install_openai_agents() -> Callable[[], None] | None:
+    """Governs every FunctionTool, including tools created before init().
+
+    The SDK runs a function tool through its ``on_invoke_tool`` field. A data
+    descriptor on the class takes precedence over each instance's field, so
+    every tool, whenever it was created, hands the SDK a governed callable.
+    Hosted tools run at OpenAI. Local shell, computer and apply_patch tools
+    don't run through on_invoke_tool and are not governed by this hook.
+    """
+    try:
+        FunctionTool = importlib.import_module("agents.tool").FunctionTool
+    except ImportError:
+        return None
+    if isinstance(FunctionTool.__dict__.get("on_invoke_tool"), property):
+        return None
+    previous = FunctionTool.__dict__.get("on_invoke_tool", _MISSING)
+    cache_key = "_thoth_governed_on_invoke_tool"
+
+    def get(self: Any) -> Any:
+        # Each tool's own function stays in its instance field; the property,
+        # a data descriptor, is found first while it is installed.
+        raw = self.__dict__.get("on_invoke_tool")
+        if raw is None or getattr(raw, _THOTH_GOVERNED, False):
+            # A copy made from a governed tool already holds the governed form.
+            return raw
+        # The same governed callable on every read: the SDK checks that a
+        # tool's on_invoke_tool doesn't change during approval evaluation.
+        cached = self.__dict__.get(cache_key)
+        if cached is not None and cached[0] is raw:
+            return cached[1]
+        governed = _govern_openai_agents_tool(self, raw)
+        self.__dict__[cache_key] = (raw, governed)
+        return governed
+
+    def set_(self: Any, value: Any) -> None:
+        self.__dict__["on_invoke_tool"] = value
+
+    FunctionTool.on_invoke_tool = property(get, set_)
+
+    def undo() -> None:
+        # The instance fields show through again.
+        if previous is _MISSING:
+            del FunctionTool.on_invoke_tool
+        else:
+            FunctionTool.on_invoke_tool = previous
+
+    return undo
+
+
 _HOOKS: dict[str, Callable[[], Callable[[], None] | None]] = {
     "langchain": _install_langchain,
+    "openai_agents": _install_openai_agents,
 }

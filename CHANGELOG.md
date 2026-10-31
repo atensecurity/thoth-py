@@ -16,6 +16,13 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ### Added
 
+- `thoth.init()` now also governs OpenAI Agents SDK (`openai-agents`)
+  function tools, including tools defined before `init()` runs. Each call is
+  checked with the model's arguments and runs with exactly what Thoth checked;
+  arguments that aren't a JSON object are refused. A refused call never runs,
+  and the model gets "Thoth refused this call: <reason>" as the tool's output.
+  Local shell, computer and apply_patch tools are not covered by this hook.
+  Tested with `openai-agents` 0.24.0's `Runner`.
 - `thoth.init()`: one call at startup governs every LangChain tool in the
   process, including the tools LangGraph's `ToolNode` runs, with no change to
   any tool. It reads

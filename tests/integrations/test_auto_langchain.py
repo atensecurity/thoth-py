@@ -98,7 +98,7 @@ def test_init_names_the_missing_setting(monkeypatch):
 
 
 def test_every_tool_is_checked_with_its_arguments_and_actor(server):
-    assert thoth.init() == ["langchain"]
+    assert "langchain" in thoth.init()
     with thoth.acting_for("alice@acme.test", session_id="s-1") as session_id:
         assert list_orders.invoke({"account": "A-1"}) == "orders for A-1"
     assert session_id == "s-1"
