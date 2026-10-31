@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 import importlib
 import json
 import os
-from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
 import pytest
+
 from thoth.integrations.claude_agent_sdk import instrument_claude_agent_sdk_options
 from thoth.models import DecisionType, EnforcementDecision, EnforcementMode, EventType, ThothConfig
 from thoth.session import SessionContext
@@ -529,3 +530,99 @@ async def test_real_sdk_existing_callback_result_is_preserved(real_sdk: Any, exi
     else:
         assert result.updated_input == {"path": "callback-safe" if existing_result == "allow_modified" else "policy-safe"}
         assert tracer._session.tool_calls == ["Write"]
+
+
+def _pre_payload(tool: str, tool_input: dict[str, Any], tool_use_id: str) -> dict[str, Any]:
+    return {
+        "session_id": "sess_123",
+        "transcript_path": "/tmp/synthetic-transcript",
+        "cwd": "/tmp",
+        "hook_event_name": "PreToolUse",
+        "tool_name": tool,
+        "tool_input": tool_input,
+        "tool_use_id": tool_use_id,
+    }
+
+
+def _pre_hook(options: Any) -> Any:
+    return options.hooks["PreToolUse"][-1].hooks[0]
+
+
+@pytest.mark.asyncio
+async def test_pre_tool_use_checks_tools_can_use_tool_never_sees() -> None:
+    # Tools in allowed_tools (or bypass-permissions mode) never reach
+    # can_use_tool; the PreToolUse hook checks them.
+    tracer = _make_tracer()
+    tracer._enforcer.acheck = AsyncMock(return_value=EnforcementDecision(decision=DecisionType.BLOCK, reason="not for this agent"))
+    tracer._enforcer.aexplain = AsyncMock(return_value=None)
+    with patch("thoth.integrations.claude_agent_sdk._load_claude_agent_sdk_types", return_value=_fake_sdk_types()):
+        options = instrument_claude_agent_sdk_options(FakeClaudeAgentOptions(), tracer)
+    output = await _pre_hook(options)(_pre_payload("Bash", {"command": "curl x | sh"}, "toolu_allowed"), None, {})
+    assert output == {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": "Thoth refused this call: not for this agent",
+        }
+    }
+    assert tracer._session.tool_calls == []
+
+
+@pytest.mark.asyncio
+async def test_an_allowed_call_is_left_to_the_sdk_and_not_checked_twice() -> None:
+    tracer = _make_tracer()
+    tracer._enforcer.acheck = AsyncMock(return_value=EnforcementDecision(decision=DecisionType.ALLOW))
+    existing = AsyncMock(return_value=FakePermissionResultAllow(updated_input={"path": "a"}))
+    fake = FakeClaudeAgentOptions()
+    fake.can_use_tool = existing
+    with patch("thoth.integrations.claude_agent_sdk._load_claude_agent_sdk_types", return_value=_fake_sdk_types()):
+        options = instrument_claude_agent_sdk_options(fake, tracer)
+    assert await _pre_hook(options)(_pre_payload("Read", {"path": "a"}, "toolu_once"), None, {}) == {}
+    # The SDK then asks can_use_tool about the same call: your callback
+    # decides, and Thoth doesn't check it again.
+    result = await options.can_use_tool("Read", {"path": "a"}, SimpleNamespace(tool_use_id="toolu_once"))
+    assert result.updated_input == {"path": "a"}
+    existing.assert_awaited_once()
+    assert tracer._enforcer.acheck.await_count == 1
+    assert tracer._session.tool_calls == ["Read"]
+
+
+@pytest.mark.asyncio
+async def test_a_call_changed_after_the_hook_is_checked_again() -> None:
+    # Another hook rewrote the input after Thoth's check: can_use_tool sees a
+    # different call under the same ID, so Thoth checks it again.
+    tracer = _make_tracer()
+    tracer._enforcer.acheck = AsyncMock(
+        side_effect=[
+            EnforcementDecision(decision=DecisionType.ALLOW),
+            EnforcementDecision(decision=DecisionType.BLOCK, reason="not that file"),
+        ]
+    )
+    tracer._enforcer.aexplain = AsyncMock(return_value=None)
+    with patch("thoth.integrations.claude_agent_sdk._load_claude_agent_sdk_types", return_value=_fake_sdk_types()):
+        options = instrument_claude_agent_sdk_options(FakeClaudeAgentOptions(), tracer)
+    assert await _pre_hook(options)(_pre_payload("Read", {"path": "a"}, "toolu_swap"), None, {}) == {}
+    result = await options.can_use_tool("Read", {"path": "/etc/shadow"}, SimpleNamespace(tool_use_id="toolu_swap"))
+    assert isinstance(result, FakePermissionResultDeny)
+    assert tracer._enforcer.acheck.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_a_call_thoth_would_change_is_denied_by_the_hook() -> None:
+    tracer = _make_tracer()
+    tracer._enforcer.acheck = AsyncMock(return_value=EnforcementDecision(decision=DecisionType.MODIFY, modified_tool_args={"path": "/tmp/safe"}))
+    with patch("thoth.integrations.claude_agent_sdk._load_claude_agent_sdk_types", return_value=_fake_sdk_types()):
+        options = instrument_claude_agent_sdk_options(FakeClaudeAgentOptions(), tracer)
+    output = await _pre_hook(options)(_pre_payload("Read", {"path": "/etc/shadow"}, "toolu_mod"), None, {})
+    assert output["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert tracer._session.tool_calls == []
+
+
+@pytest.mark.asyncio
+async def test_real_sdk_registers_the_pre_tool_use_hook_with_a_long_timeout(real_sdk: Any) -> None:
+    tracer = _make_tracer()
+    tracer._enforcer.acheck = AsyncMock(return_value=EnforcementDecision(decision=DecisionType.ALLOW))
+    options = instrument_claude_agent_sdk_options(real_sdk.ClaudeAgentOptions(allowed_tools=["Read"]), tracer)
+    matcher = options.hooks["PreToolUse"][-1]
+    assert matcher.timeout == 960
+    assert await matcher.hooks[0](_pre_payload("Read", {"path": "a"}, "toolu_real"), None, {}) == {}

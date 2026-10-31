@@ -4,6 +4,16 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ## Unreleased
 
+### Fixed
+
+- Claude Agent SDK: `instrument_claude_agent_sdk_options` now checks every
+  tool call in a PreToolUse hook, including tools in `allowed_tools` and calls
+  in bypass-permissions mode, which the SDK never passes to `can_use_tool` and
+  which Thoth therefore didn't check before. An allowed call is still left to
+  the SDK's rules and your `can_use_tool`, which reuses the hook's decision
+  instead of checking again. A call whose arguments Thoth would change is
+  denied by the hook.
+
 ### Added
 
 - `thoth.init()`: one call at startup governs every LangChain tool in the

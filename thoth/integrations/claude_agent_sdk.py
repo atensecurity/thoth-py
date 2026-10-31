@@ -1,12 +1,16 @@
 """Integration helpers for the official ``claude-agent-sdk`` Python package.
 
-This module instruments ``ClaudeAgentOptions`` by wiring Thoth policy
-enforcement into ``can_use_tool`` and optional hook callbacks.
+This module instruments ``ClaudeAgentOptions``: a PreToolUse hook checks
+every tool call with Thoth before it runs, including tools in
+``allowed_tools``, which the SDK never passes to ``can_use_tool``. The
+governed ``can_use_tool`` reuses the hook's decision for the same call, and
+checks the call itself only when no hook ran for it.
 """
 
 from __future__ import annotations
 
 import importlib
+import json
 from typing import Any
 
 from thoth.exceptions import ThothPolicyViolation
@@ -14,6 +18,15 @@ from thoth.models import EventType
 from thoth.tracer import Tracer, _enforcement_outcome_context, _policy_violation_metadata, _resolve_action_attestation_id
 
 _MAX_PENDING_DECISIONS = 1024
+_PRE_TOOL_USE_TIMEOUT_SECONDS = 16 * 60
+
+
+def _hook_matcher(matcher_type: Any, hook: Any, *, timeout: float) -> Any:
+    """A HookMatcher for every tool, with a timeout where the SDK supports one."""
+    try:
+        return matcher_type(matcher=None, hooks=[hook], timeout=timeout)
+    except TypeError:
+        return matcher_type(matcher=None, hooks=[hook])
 
 
 def _load_claude_agent_sdk_types() -> dict[str, type[Any]]:
@@ -107,12 +120,21 @@ def instrument_claude_agent_sdk_options(
             return configured
         return (provider_id.strip() or None) if isinstance(provider_id, str) else None
 
-    async def governed_can_use_tool(
-        tool_name: str,
-        tool_input: dict[str, Any],
-        context: Any,
-    ) -> Any:
-        provider_id = getattr(context, "tool_use_id", None)
+    # Calls the PreToolUse hook has already allowed, by provider tool-use ID,
+    # with the exact tool and input checked, so can_use_tool (which the SDK
+    # calls only for tools not already allowed) doesn't check the same call
+    # twice. If anything changed the call since (another hook rewriting its
+    # input), it no longer matches and is checked again.
+    hook_decided: dict[str, tuple[str, str]] = {}
+
+    def fingerprint(tool_name: str, tool_input: Any) -> tuple[str, str]:
+        try:
+            return tool_name, json.dumps(tool_input, sort_keys=True, default=repr)
+        except (TypeError, ValueError):
+            return tool_name, f"unserializable:{id(tool_input)}"
+
+    async def check(tool_name: str, tool_input: dict[str, Any], provider_id: Any) -> tuple[Any, Any]:
+        """Thoth's check of one call: (enforcement, None) or (None, violation)."""
         action_attestation_id = known_action_id(provider_id) or _resolve_action_attestation_id(tracer._config)
         metadata = tracer._base_tool_metadata(tool_name, tool_input, action_attestation_id)
         tracer._emit(
@@ -142,12 +164,68 @@ def instrument_claude_agent_sdk_options(
                     "event_phase": "block",
                 },
             )
-            return PermissionResultDeny(message=exc.reason, interrupt=False)
+            return None, exc
+        return enforcement, None
 
+    def checked_input(enforcement: Any, tool_input: dict[str, Any]) -> dict[str, Any]:
         call_args = enforcement.effective_args
         updated_input = call_args[0] if call_args and isinstance(call_args[0], dict) else tool_input
         if isinstance(updated_input, dict) and set(updated_input.keys()) == {"input"} and isinstance(updated_input.get("input"), dict):
             updated_input = updated_input["input"]
+        return updated_input
+
+    def deny_output(reason: str) -> dict[str, Any]:
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}
+
+    async def _pre_tool_use(hook_input: dict[str, Any], tool_use_id: str | None, _context: Any) -> dict[str, Any]:
+        """Thoth's check before every tool call, including tools in allowed_tools,
+        which the SDK never passes to can_use_tool. An allowed call returns no
+        decision, so the SDK's own permission rules still apply."""
+        tool_name = hook_input.get("tool_name")
+        if not isinstance(tool_name, str) or not tool_name:
+            return deny_output("Thoth couldn't identify this tool call.")
+        raw_input = hook_input.get("tool_input")
+        tool_input = raw_input if isinstance(raw_input, dict) else {}
+        provider_id = hook_input.get("tool_use_id") or tool_use_id
+        enforcement, violation = await check(tool_name, tool_input, provider_id)
+        if violation is not None:
+            return deny_output(f"Thoth refused this call: {violation.reason}")
+        if checked_input(enforcement, tool_input) != tool_input:
+            # A hook can't change input without overriding the SDK's own
+            # permission rules, so a call Thoth would change is not run.
+            tracer._emit(tool_name, EventType.TOOL_CALL_BLOCK, "arguments changed by policy", metadata={"event_phase": "block"})
+            return deny_output("Thoth would change this call's arguments, which this integration doesn't apply, so it was not run.")
+        tracer._session.record_tool_call(tool_name)
+        if emit_tool_lifecycle_hooks:
+            remember_decision(provider_id, _enforcement_outcome_context(enforcement))
+        key = provider_action_id(provider_id)
+        if key is not None:
+            hook_decided[key] = fingerprint(tool_name, tool_input)
+            while len(hook_decided) > _MAX_PENDING_DECISIONS:
+                hook_decided.pop(next(iter(hook_decided)))
+        return {}
+
+    async def governed_can_use_tool(
+        tool_name: str,
+        tool_input: dict[str, Any],
+        context: Any,
+    ) -> Any:
+        provider_id = getattr(context, "tool_use_id", None)
+        key = provider_action_id(provider_id)
+        decided = hook_decided.pop(key, None) if key is not None else None
+        if decided is not None and decided == fingerprint(tool_name, tool_input):
+            # Already checked and allowed by the PreToolUse hook: this call, unchanged.
+            if existing_can_use_tool is not None:
+                return await existing_can_use_tool(tool_name, tool_input, context)
+            return PermissionResultAllow(updated_input=tool_input)
+
+        # No hook allowed this exact call (a CLI without hooks, or input changed
+        # since the hook's check): check it here.
+        metadata = tracer._base_tool_metadata(tool_name, tool_input, known_action_id(provider_id) or "")
+        enforcement, violation = await check(tool_name, tool_input, provider_id)
+        if violation is not None:
+            return PermissionResultDeny(message=violation.reason, interrupt=False)
+        updated_input = checked_input(enforcement, tool_input)
 
         if existing_can_use_tool is not None:
             result = await existing_can_use_tool(tool_name, updated_input, context)
@@ -174,8 +252,12 @@ def instrument_claude_agent_sdk_options(
 
     options.can_use_tool = governed_can_use_tool
 
+    hooks = dict(options.hooks or {})
+    # Longer than the default step-up wait, so a held call can be decided.
+    hooks.setdefault("PreToolUse", []).append(_hook_matcher(HookMatcher, _pre_tool_use, timeout=_PRE_TOOL_USE_TIMEOUT_SECONDS))
+    options.hooks = hooks
+
     if emit_tool_lifecycle_hooks:
-        hooks = dict(options.hooks or {})
 
         def hook_metadata(hook_input: dict[str, Any], tool_use_id: str | None) -> dict[str, Any]:
             action_id = known_action_id(hook_input.get("tool_use_id")) or known_action_id(tool_use_id)

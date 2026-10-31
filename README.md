@@ -301,7 +301,11 @@ See `examples/langgraph_example.py` for the full working script.
 ### Claude Agent SDK (`query`)
 
 For `claude-agent-sdk`, instrument `ClaudeAgentOptions` instead of a `.tools` list.
-Thoth hooks into `can_use_tool` and tool lifecycle hooks.
+Thoth adds a PreToolUse hook that checks every tool call before it runs, including
+tools in `allowed_tools` (which the SDK never passes to `can_use_tool`), plus tool
+lifecycle hooks. When Thoth allows a call, the SDK's own permission rules and your
+`can_use_tool` still decide; a refused call is denied with Thoth's reason, and a call
+whose arguments Thoth would change is denied.
 
 ```python
 import anyio
