@@ -73,6 +73,7 @@ import contextvars
 import dataclasses
 from dataclasses import dataclass, field
 import functools
+import hashlib
 import importlib
 import inspect
 import json
@@ -100,6 +101,19 @@ from thoth.tracer import Tracer, _tool_args_from_call
 # ended, kept so a later request resuming them continues their tool-call
 # history. Only these are ever dropped, oldest first; a session in use never is.
 _MAX_RESUMABLE = 10_000
+
+
+def named_session_id(tenant_id: str, agent_id: str, user_id: str, session_id: str) -> str:
+    """The session ID Thoth sees for a caller-named session.
+
+    The caller's ID is only unique within one user's sessions, so two users
+    naming the same ID must never share a session in Thoth: the ID sent is
+    derived from the tenant, agent, user and the caller's ID. It is stable
+    across processes, so a later request resuming the session continues it,
+    and the TypeScript SDK derives the same ID.
+    """
+    digest = hashlib.sha256("\x00".join(["thoth-named-session-v1", tenant_id, agent_id, user_id, session_id]).encode()).hexdigest()
+    return f"{digest[0:8]}-{digest[8:12]}-{digest[12:16]}-{digest[16:20]}-{digest[20:32]}"
 
 
 @dataclass(eq=False)
@@ -147,9 +161,10 @@ class _Runtime:
                 tracer = self.live.get(actor.key) or self.resumable.pop(actor.key, None)
                 if tracer is None:
                     config = self.config.model_copy(update={"user_id": actor.user_id})
+                    wire_session_id = named_session_id(config.tenant_id, config.agent_id, actor.user_id, actor.session_id) if actor.named else actor.session_id
                     tracer = Tracer(
                         config=config,
-                        session=SessionContext(config, session_id=actor.session_id),
+                        session=SessionContext(config, session_id=wire_session_id),
                         emitter=self.emitter,
                         enforcer=EnforcerClient(config, http=self.enforcer_http[0], async_http=self.enforcer_http[1]),
                         step_up=StepUpClient(config, http=self.step_up_http[0], async_http=self.step_up_http[1]),

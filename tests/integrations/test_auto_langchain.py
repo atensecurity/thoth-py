@@ -108,7 +108,8 @@ def test_every_tool_is_checked_with_its_arguments_and_actor(server):
     assert check["tool_args"] == {"account": "A-1"}
     assert check["agent_id"] == "trader"
     assert check["user_id"] == "alice@acme.test"
-    assert check["session_id"] == "s-1"
+    # Thoth sees an ID derived from the tenant, agent, user and the caller's ID.
+    assert check["session_id"] == auto.named_session_id("acme", "trader", "alice@acme.test", "s-1")
 
 
 def test_a_refused_tool_never_runs(server):
@@ -203,6 +204,16 @@ def test_a_named_session_continues_across_blocks(server):
     with thoth.acting_for("erin@acme.test", session_id="conversation-7"):
         list_orders.invoke({"account": "L"})
     assert server.checks[-1]["session_tool_calls"] == ["list_orders"]
+    # ...and Thoth never sees the two as one session.
+    assert server.checks[-1]["session_id"] != server.checks[0]["session_id"]
+    assert "conversation-7" not in {check["session_id"] for check in server.checks}
+
+
+def test_the_named_session_id_matches_the_typescript_sdk():
+    # Tenant acme, agent trader, user alice@acme.test, session conv-1: the
+    # TypeScript SDK's tests use the same vector.
+    assert auto.named_session_id("acme", "trader", "alice@acme.test", "conv-1") == "b4541a04-7924-c176-3889-86833d84ef0f"
+    assert auto.named_session_id("other", "trader", "alice@acme.test", "conv-1") != "b4541a04-7924-c176-3889-86833d84ef0f"
 
 
 def test_a_tool_already_wrapped_is_checked_once(server):

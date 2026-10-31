@@ -6,6 +6,11 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ### Fixed
 
+- `acting_for(user, session_id=...)`: Thoth now sees a session ID derived from
+  the tenant, agent, user and your session ID, rather than your ID itself, so
+  two users who name the same session never share one in Thoth. The ID is
+  stable across processes, so resuming a conversation still continues its
+  history, and the TypeScript SDK derives the same ID.
 - Claude Agent SDK: `instrument_claude_agent_sdk_options` now checks every
   tool call in a PreToolUse hook, including tools in `allowed_tools` and calls
   in bypass-permissions mode, which the SDK never passes to `can_use_tool` and
