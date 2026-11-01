@@ -4,6 +4,18 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `thoth.init()` now also governs the Anthropic client's tools: every tool
+  the tool runner (`client.beta.messages.tool_runner`) or the session tool
+  runner calls, and any direct `tool.call()`. That covers `@beta_tool` and
+  `@beta_async_tool` functions, MCP tools from `mcp_tool` and
+  `async_mcp_tool` (checked once, not again by the MCP hook), and built-in
+  tools such as your memory tool, including classes defined after `init()`.
+  Each call is checked with the input it runs with; a refused call never
+  runs, and Claude gets "Thoth refused this call: <reason>" as an error tool
+  result. Tested with `anthropic` 2.3.0.
+
 ### Changed
 
 - `api_url` defaults to `https://api.atensecurity.com`, the API for trial and

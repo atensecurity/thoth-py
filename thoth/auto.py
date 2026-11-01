@@ -49,6 +49,12 @@ Frameworks governed (more follow):
   connection, with a PreToolUse hook that checks each call, including tools
   in allowed_tools, before the CLI runs it. A refusal denies the call with
   "Thoth refused this call: <reason>". The caller's options are not changed.
+- Anthropic client tools, at call(input), which the tool runners
+  (client.beta.messages.tool_runner and the session tool runner) use for
+  every tool: @beta_tool and @beta_async_tool functions, the MCP helper's
+  tools and built-in tools such as the memory tool. A refusal raises
+  ToolError, which the runner sends to Claude as an error tool result,
+  "Thoth refused this call: <reason>".
 - MCP tool calls made with ClientSession.call_tool, directly or through a
   framework's MCP adapter. A call a framework hook already checked (the same
   arguments, under the MCP tool's name or a prefixed form of it) isn't checked
@@ -1051,6 +1057,143 @@ def _install_claude_agent_sdk() -> Callable[[], None] | None:
     return undo
 
 
+# --- Anthropic client tools (anthropic) ---------------------------------------------
+
+
+def _anthropic_tool_name(tool: Any) -> str:
+    try:
+        name = tool.name
+    except Exception:
+        # A built-in tool whose definition has no name.
+        return ""
+    return name if isinstance(name, str) else ""
+
+
+def _govern_anthropic_call(original: Callable[..., Any]) -> Callable[..., Any]:
+    """The governed form of an Anthropic tool's call(input)."""
+    tool_error = importlib.import_module("anthropic.lib.tools").ToolError
+
+    def prepare(self: Any, tool_input: Any) -> tuple[_Runtime | None, str]:
+        runtime = _runtime()
+        if runtime is None:
+            return None, ""
+        name = _anthropic_tool_name(self)
+        if not name or not isinstance(tool_input, dict):
+            # Nothing Thoth can check, so the tool doesn't run.
+            raise tool_error(_refused("the call can't be checked, so it was not run"))
+        if claim_checked_call(name, tool_input):
+            # Already checked: a subclass calling super().call with the same input.
+            return None, ""
+        runtime.report(SimpleNamespace(name=name, description=getattr(self, "description", "") or "", input_schema=getattr(self, "input_schema", None)))
+        return runtime, name
+
+    if inspect.iscoroutinefunction(original):
+
+        @functools.wraps(original)
+        async def acall(self: Any, tool_input: Any, *args: Any, **kwargs: Any) -> Any:
+            runtime, name = prepare(self, tool_input)
+            if runtime is None:
+                return await original(self, tool_input, *args, **kwargs)
+            tracer = runtime.tracer()
+
+            async def run(checked: Any) -> Any:
+                # Exactly the input Thoth checked.
+                return await original(self, checked, *args, **kwargs)
+
+            token = _CURRENT_SESSION.set(tracer._session)
+            try:
+                return await tracer.wrap_tool(name, run)(tool_input)
+            except ThothPolicyViolation as exc:
+                # The runner sends a ToolError's content to Claude as an error result.
+                raise tool_error(_refused(exc.reason)) from exc
+            finally:
+                _CURRENT_SESSION.reset(token)
+
+        setattr(acall, _THOTH_GOVERNED, True)
+        return acall
+
+    @functools.wraps(original)
+    def call(self: Any, tool_input: Any, *args: Any, **kwargs: Any) -> Any:
+        runtime, name = prepare(self, tool_input)
+        if runtime is None:
+            return original(self, tool_input, *args, **kwargs)
+        tracer = runtime.tracer()
+        token = _CURRENT_SESSION.set(tracer._session)
+        try:
+            return tracer.wrap_tool(name, lambda checked: original(self, checked, *args, **kwargs))(tool_input)
+        except ThothPolicyViolation as exc:
+            raise tool_error(_refused(exc.reason)) from exc
+        finally:
+            _CURRENT_SESSION.reset(token)
+
+    setattr(call, _THOTH_GOVERNED, True)
+    return call
+
+
+def _install_anthropic() -> Callable[[], None] | None:
+    """Governs the Anthropic client's runnable tools at call(input).
+
+    The tool runners (client.beta.messages.tool_runner and the session tool
+    runner) run every tool with tool.call(tool_use.input), so the input
+    checked is the one run; a direct tool.call() is governed too. That covers
+    @beta_tool and @beta_async_tool functions, the MCP helper's tools, and
+    built-in tools such as the memory tool. Built-in tool classes override
+    call, so it is wrapped on each class that defines its own, and on
+    subclasses defined after init(). A refusal raises ToolError, "Thoth
+    refused this call: <reason>", which the runner sends to Claude as an
+    error tool result.
+    """
+    try:
+        tools = importlib.import_module("anthropic.lib.tools")
+    except ImportError:
+        return None
+    roots = [getattr(tools, name, None) for name in ("BetaFunctionTool", "BetaAsyncFunctionTool", "BetaBuiltinFunctionTool", "BetaAsyncBuiltinFunctionTool")]
+    roots = [root for root in roots if isinstance(root, type)]
+    if not roots:
+        return None
+    wrapped: list[tuple[type, Any]] = []
+    hooks: list[tuple[type, Any]] = []
+
+    def wrap(cls: type) -> None:
+        original = cls.__dict__.get("call")
+        if original is None or getattr(original, _THOTH_GOVERNED, False) or getattr(original, "__isabstractmethod__", False):
+            return
+        wrapped.append((cls, original))
+        cls.call = _govern_anthropic_call(original)  # type: ignore[attr-defined]
+
+    def walk(cls: type) -> None:
+        wrap(cls)
+        for subclass in cls.__subclasses__():
+            walk(subclass)
+
+    def subclass_hook(root: type, previous_hook: Any) -> Any:
+        def init_subclass(cls: type, **kwargs: Any) -> None:
+            if previous_hook is not None:
+                previous_hook.__func__(cls, **kwargs)
+            else:
+                super(root, cls).__init_subclass__(**kwargs)
+            wrap(cls)
+
+        return classmethod(init_subclass)
+
+    for root in roots:
+        walk(root)
+        previous_hook = root.__dict__.get("__init_subclass__")
+        root.__init_subclass__ = subclass_hook(root, previous_hook)  # type: ignore[assignment]
+        hooks.append((root, previous_hook))
+
+    def undo() -> None:
+        for cls, original in wrapped:
+            cls.call = original  # type: ignore[attr-defined]
+        for root, previous_hook in hooks:
+            if previous_hook is None:
+                del root.__init_subclass__
+            else:
+                root.__init_subclass__ = previous_hook
+
+    return undo
+
+
 # --- MCP client ------------------------------------------------------------------
 
 
@@ -1122,5 +1265,6 @@ _HOOKS: dict[str, Callable[[], Callable[[], None] | None]] = {
     "agent_framework": _install_agent_framework,
     "strands": _install_strands,
     "claude_agent_sdk": _install_claude_agent_sdk,
+    "anthropic": _install_anthropic,
     "mcp_client": _install_mcp_client,
 }
