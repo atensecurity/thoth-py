@@ -1,8 +1,10 @@
 """
-Thoth + AutoGen (pyautogen / ag2) — getting started example.
+Thoth + AutoGen 0.2 API (AG2 0.x, imported as autogen) — getting started example.
+
+For AG2 1.x, call thoth.init() instead; see the README.
 
 Prerequisites:
-    pip install "atensec-thoth" pyautogen
+    pip install "atensec-thoth" "ag2<1"
 
 Environment variables:
     THOTH_API_KEY      — your Thoth API key (get one at https://app.atensecurity.com)

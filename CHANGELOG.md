@@ -15,14 +15,30 @@ All notable changes to `atensec-thoth` are documented in this file.
   Each call is checked with the input it runs with; a refused call never
   runs, and Claude gets "Thoth refused this call: <reason>" as an error tool
   result. Tested with `anthropic` 2.3.0.
+- `thoth.init()` now also governs AG2 (1.x): every function tool an AG2
+  `Agent` runs, from `@tool`, a `Toolkit` or a subagent tool, is checked
+  with the arguments it runs with, after the tool's and the agent's tool
+  middleware. A refused call never runs, and the model gets "Thoth refused
+  this call: <reason>" as an error tool result. Tested with `ag2` 1.2.2.
 
 ### Changed
 
+- The `autogen` extra now installs AG2 (`ag2>=1.0`), and an `ag2` extra is
+  added. It used to install `pyautogen`, which is now a proxy for Microsoft's
+  `autogen-agentchat`, an API Thoth didn't govern. For Microsoft's agents,
+  use Microsoft Agent Framework, which `thoth.init()` governs.
 - `api_url` defaults to `https://api.atensecurity.com`, the API for trial and
   self-serve workspaces, when neither `api_url` nor `THOTH_API_URL` is set,
   including for `thoth.init()`. Previously the SDK refused to start without
   one. Enterprise workspaces keep setting their own host; an explicit value
   always wins.
+
+### Fixed
+
+- `wrap_autogen_tools` takes the Thoth settings (`agent_id`, `tenant_id`,
+  `approved_scope` and the rest) as its docstring showed; it used to accept
+  only a tracer, so the documented example raised `TypeError`. Passing a
+  tracer still works. It is for AutoGen 0.2-style function maps (AG2 0.x).
 
 ## 0.6.0 - 2026-10-31
 

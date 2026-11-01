@@ -11,8 +11,9 @@ from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 PROVIDERS = {
+    "ag2": {"ag2"},
     "anthropic": {"anthropic"},
-    "autogen": {"pyautogen"},
+    "autogen": {"ag2"},
     "claude": {"claude-agent-sdk"},
     "langchain": {"langchain-core"},
     "langgraph": {"langchain-core", "langgraph"},

@@ -45,6 +45,10 @@ Frameworks governed (more follow):
   call reaches (the event loop, direct agent.tool calls, the bidirectional
   loop and background tools) after hooks and tool middleware. A refusal ends
   the call with an error tool result, "Thoth refused this call: <reason>".
+- AG2 (1.x) function tools, at FunctionTool._execute, which every function
+  tool an Agent runs (@tool, Toolkit and subagent tools) reaches after the
+  tool's and the agent's tool middleware. A refusal returns an error tool
+  result, "Thoth refused this call: <reason>".
 - Claude Agent SDK tool calls, for every query() and ClaudeSDKClient
   connection, with a PreToolUse hook that checks each call, including tools
   in allowed_tools, before the CLI runs it. A refusal denies the call with
@@ -76,6 +80,7 @@ from collections import OrderedDict
 from collections.abc import Iterator
 from contextlib import contextmanager
 import contextvars
+import copy
 import dataclasses
 from dataclasses import dataclass, field
 import functools
@@ -982,6 +987,91 @@ def _install_strands() -> Callable[[], None] | None:
     return undo
 
 
+# --- AG2 ---------------------------------------------------------------------------
+
+
+def _govern_ag2_execute(original: Callable[..., Any]) -> Callable[..., Any]:
+    """The governed form of an AG2 FunctionTool's _execute(event, context)."""
+    events = importlib.import_module("ag2.events")
+
+    def refusal(event: Any, reason: str, error: Exception) -> Any:
+        # An error result, as AG2 reports a tool's own failure, with the
+        # refusal as its text rather than a traceback.
+        return events.ToolErrorEvent(parent_id=event.id, name=event.name, error=error, result=events.ToolResult(_refused(reason)))
+
+    @functools.wraps(original)
+    async def _execute(self: Any, event: Any, context: Any, *args: Any, **kwargs: Any) -> Any:
+        runtime = _runtime()
+        if runtime is None:
+            return await original(self, event, context, *args, **kwargs)
+        name = getattr(self, "name", "")
+        try:
+            # The arguments after AG2's tool middleware, which may replace them.
+            arguments = event.serialized_arguments
+        except Exception as exc:
+            return refusal(event, "the call can't be checked, so it was not run", exc)
+        if not isinstance(name, str) or not name or not isinstance(arguments, dict):
+            return refusal(event, "the call can't be checked, so it was not run", ValueError("unchecked tool call"))
+        if claim_checked_call(name, arguments):
+            return await original(self, event, context, *args, **kwargs)
+        function = getattr(getattr(self, "schema", None), "function", None)
+        runtime.report(SimpleNamespace(name=name, description=getattr(function, "description", "") or "", input_schema=getattr(function, "parameters", None)))
+        tracer = runtime.tracer()
+
+        async def run(checked: Any) -> Any:
+            # Exactly the arguments Thoth checked.
+            call = copy.copy(event)
+            call.serialized_arguments = checked
+            return await original(self, call, context, *args, **kwargs)
+
+        token = _CURRENT_SESSION.set(tracer._session)
+        try:
+            return await tracer.wrap_tool(name, run)(arguments)
+        except ThothPolicyViolation as exc:
+            return refusal(event, exc.reason, exc)
+        finally:
+            _CURRENT_SESSION.reset(token)
+
+    setattr(_execute, _THOTH_GOVERNED, True)
+    return _execute
+
+
+def _install_ag2() -> Callable[[], None] | None:
+    """Governs AG2 (1.x) function tools at FunctionTool._execute.
+
+    Each function tool an AG2 Agent runs, from @tool, a Toolkit or a
+    subagent tool, ends in FunctionTool._execute(event, context) after the
+    tool's own and the agent's tool middleware, which may replace the
+    arguments; the arguments checked are the ones run. MCP toolkits call
+    their servers through mcp's ClientSession, which the MCP hook governs.
+    Client tools run in the caller's own application, not in AG2. A refusal
+    returns an error tool result, "Thoth refused this call: <reason>".
+    """
+    try:
+        FunctionTool = importlib.import_module("ag2.tools.final.function_tool").FunctionTool
+    except ImportError:
+        return None
+    wrapped: list[tuple[type, Any]] = []
+
+    def walk(cls: type) -> None:
+        original = cls.__dict__.get("_execute")
+        if original is not None and not getattr(original, _THOTH_GOVERNED, False):
+            wrapped.append((cls, original))
+            cls._execute = _govern_ag2_execute(original)  # type: ignore[attr-defined]
+        for subclass in cls.__subclasses__():
+            walk(subclass)
+
+    walk(FunctionTool)
+    if not wrapped:
+        return None
+
+    def undo() -> None:
+        for cls, original in wrapped:
+            cls._execute = original  # type: ignore[attr-defined]
+
+    return undo
+
+
 # --- Claude Agent SDK ------------------------------------------------------------
 
 
@@ -1264,6 +1354,7 @@ _HOOKS: dict[str, Callable[[], Callable[[], None] | None]] = {
     "google_adk": _install_google_adk,
     "agent_framework": _install_agent_framework,
     "strands": _install_strands,
+    "ag2": _install_ag2,
     "claude_agent_sdk": _install_claude_agent_sdk,
     "anthropic": _install_anthropic,
     "mcp_client": _install_mcp_client,

@@ -17,6 +17,7 @@ class WheelContractTests(unittest.TestCase):
         self.metadata = """Metadata-Version: 2.3
 Name: atensec-thoth
 Version: 0.5.21
+Provides-Extra: ag2
 Provides-Extra: anthropic
 Provides-Extra: autogen
 Provides-Extra: claude
@@ -24,8 +25,8 @@ Provides-Extra: langchain
 Provides-Extra: langgraph
 Provides-Extra: openai
 Requires-Dist: anyio>=4
+Requires-Dist: ag2>=1.0; extra == "ag2" or extra == "autogen"
 Requires-Dist: anthropic>=0.40; extra == "anthropic"
-Requires-Dist: pyautogen>=0.2; extra == "autogen"
 Requires-Dist: claude-agent-sdk>=0.1.66; extra == "claude"
 Requires-Dist: langchain-core>=0.2; extra == "langchain" or extra == "langgraph"
 Requires-Dist: langgraph>=0.2; extra == "langgraph"
@@ -48,7 +49,7 @@ Requires-Dist: openai>=1.50; extra == "openai"
             check_wheel(self.wheel)
 
     def test_each_missing_provider_rejected(self):
-        for provider in ["anthropic", "pyautogen", "claude-agent-sdk", "langchain-core", "langgraph", "openai"]:
+        for provider in ["ag2", "anthropic", "claude-agent-sdk", "langchain-core", "langgraph", "openai"]:
             with self.subTest(provider=provider):
                 self.write("\n".join(line for line in self.metadata.splitlines() if not line.startswith(f"Requires-Dist: {provider}>")))
                 with self.assertRaises(ValueError):

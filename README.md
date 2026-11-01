@@ -22,7 +22,7 @@ stepping up for human approval, or silently observing based on your configured e
    - [OpenAI Function Calling](#openai-function-calling)
    - [Anthropic Claude](#anthropic-claude)
    - [CrewAI](#crewai)
-   - [AutoGen](#autogen)
+   - [AG2 and AutoGen](#ag2-and-autogen)
    - [Custom Tools (Generic)](#custom-tools-generic)
 7. [Enforcement Modes](#enforcement-modes)
 8. [Policy Decisions](#policy-decisions)
@@ -58,10 +58,10 @@ pip install "atensec-thoth[openai]"
 pip install "atensec-thoth[claude]"
 ```
 
-**With AutoGen support:**
+**With AG2 support** (`autogen` installs the same):
 
 ```bash
-pip install "atensec-thoth[autogen]"
+pip install "atensec-thoth[ag2]"
 ```
 
 **Requirements:** Python 3.12+
@@ -489,10 +489,31 @@ thoth.instrument(
 
 See `examples/crewai_example.py` for the full working script.
 
-### AutoGen
+### AG2 and AutoGen
 
-Use one-call toolchain instrumentation and let the SDK build AutoGen's
-`function_map` for you:
+For AG2 1.x, call `thoth.init()` at startup: every function tool an AG2
+`Agent` runs is checked with the arguments it runs with, after the tool's and
+the agent's tool middleware, and a refused call never runs.
+
+```python
+import thoth
+from ag2 import Agent, tool
+
+thoth.init()  # THOTH_API_KEY, THOTH_TENANT_ID, THOTH_AGENT_ID
+
+@tool
+def send_email(to: str, subject: str, body: str) -> str:
+    return f"Email sent to {to}"
+
+agent = Agent("assistant", config=..., tools=[send_email])
+
+with thoth.acting_for("alice@acme.com"):
+    reply = await agent.ask("Email the summary to the team")
+```
+
+For the AutoGen 0.2 API, which AG2 0.x kept (`pip install "ag2<1"`, imported
+as `autogen`), govern the `function_map` a `UserProxyAgent` runs. Use
+one-call toolchain instrumentation and let the SDK build it for you:
 
 ```python
 import os
