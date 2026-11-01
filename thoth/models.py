@@ -58,6 +58,10 @@ _DECISION_ALIASES: dict[str, DecisionType] = {
 _TTL_90_DAYS = 90 * 24 * 60 * 60
 UTC = UTC
 
+# The API for trial and self-serve workspaces. Enterprise workspaces have their
+# own host and set it with api_url or THOTH_API_URL.
+DEFAULT_API_URL = "https://api.atensecurity.com"
+
 
 def _tenant_scoped_event_id(tenant_id: str, event_id: str | None) -> str:
     tenant = (tenant_id or "").strip() or "unknown"
@@ -178,7 +182,7 @@ class ThothConfig(BaseModel):
             return override.rstrip("/")
         if self.api_url:
             return self.api_url.rstrip("/")
-        raise ValueError("Thoth API URL is required (set api_url or THOTH_API_URL)")
+        return DEFAULT_API_URL
 
     @property
     def resolved_enforcer_url(self) -> str:

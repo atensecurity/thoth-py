@@ -91,7 +91,7 @@ from thoth.emitter import HttpEmitter
 from thoth.enforcer_client import EnforcerClient, enforcer_http_clients
 from thoth.exceptions import ThothPolicyViolation
 from thoth.logging_config import configure_thoth_logging_from_env
-from thoth.models import EnforcementMode, ThothConfig
+from thoth.models import DEFAULT_API_URL, EnforcementMode, ThothConfig
 from thoth.session import SessionContext
 from thoth.step_up import StepUpClient, step_up_http_clients
 from thoth.tool_inventory import publish_tool_inventory
@@ -236,7 +236,7 @@ def init(
     config = ThothConfig(
         agent_id=_setting(agent_id, "THOTH_AGENT_ID"),
         tenant_id=_setting(tenant_id, "THOTH_TENANT_ID"),
-        api_url=_setting(api_url, "THOTH_API_URL"),
+        api_url=(api_url or os.getenv("THOTH_API_URL") or "").strip() or DEFAULT_API_URL,
         api_key=_setting(api_key, "THOTH_API_KEY"),
         approved_scope=list(approved_scope or []),
         user_id=user_id,

@@ -24,6 +24,7 @@ from thoth.enforcer_client import EnforcerClient
 from thoth.exceptions import ThothDeferredError, ThothPolicyViolation
 from thoth.logging_config import configure_thoth_logging_from_env
 from thoth.models import (
+    DEFAULT_API_URL,
     BehavioralEvent,
     DecisionType,
     EnforcementDecision,
@@ -908,9 +909,7 @@ def _build_runtime(
     configure_thoth_logging_from_env()
     resolved_api_key = api_key or os.getenv("THOTH_API_KEY")
     resolved_event_ingest_token = event_ingest_token or os.getenv("THOTH_EVENT_INGEST_TOKEN")
-    resolved_api_url = (api_url or os.getenv("THOTH_API_URL") or "").strip()
-    if not resolved_api_url:
-        raise ValueError("Thoth API URL is required (pass api_url or set THOTH_API_URL)")
+    resolved_api_url = (api_url or os.getenv("THOTH_API_URL") or "").strip() or DEFAULT_API_URL
 
     config = ThothConfig(
         agent_id=agent_id,

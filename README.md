@@ -77,7 +77,7 @@ pip install "atensec-thoth[autogen]"
 
 ```bash
 export THOTH_API_KEY="thoth_live_..."
-export THOTH_API_URL="https://enforce.<tenant>.<apex-domain>"
+export THOTH_API_URL="https://api.atensecurity.com" # optional: trial and self-serve default; Enterprise: your enforce. host
 ```
 
 **3. Supported agent frameworks: one call, no tool changes.**
@@ -733,7 +733,7 @@ if session:
 | `enforcement` | `str` | `"block"` | Enforcement mode: `observe`, `step_up`, `block`, or `progressive`. |
 | `api_key` | `str \| None` | `$THOTH_API_KEY` | API key from the Aten dashboard. Events sent over HTTPS — no AWS credentials required. |
 | `event_ingest_token` | `str \| None` | `$THOTH_EVENT_INGEST_TOKEN` | Optional dedicated token sent as `X-Thoth-Event-Ingest-Token` for `/v1/events/batch`. |
-| `api_url` | `str \| None` | `$THOTH_API_URL` | Required tenant API base URL used for both event ingestion and policy checks. |
+| `api_url` | `str \| None` | `$THOTH_API_URL`, then `https://api.atensecurity.com` | Tenant API base URL used for both event ingestion and policy checks. Enterprise workspaces set their own host. |
 | `session_id` | `str \| None` | auto-generated UUID | Pass an existing session ID to continue a session across calls. |
 | `session_intent` | `str \| None` | `None` | Intent label used for minimum-necessary/session-scope policies. |
 | `purpose` | `str \| None` | `None` | Policy context for allowed business purpose. |
@@ -766,7 +766,7 @@ if session:
 | `enforcement` | `EnforcementMode` | `BLOCK` | Enforcement mode. |
 | `api_key` | `str \| None` | `None` | Aten API key. Falls back to `THOTH_API_KEY` env var via `_build_components`. |
 | `event_ingest_token` | `str \| None` | `None` | Optional dedicated token for telemetry ingest. Falls back to `THOTH_EVENT_INGEST_TOKEN`. |
-| `api_url` | `str \| None` | `None` | Required tenant API base URL. Provide directly or via `THOTH_API_URL`. Used for both `/v1/enforce` and `/v1/events/batch`. |
+| `api_url` | `str \| None` | `$THOTH_API_URL`, then `https://api.atensecurity.com` | Tenant API base URL; Enterprise workspaces set their own host. Used for both `/v1/enforce` and `/v1/events/batch`. |
 | `step_up_timeout_minutes` | `int` | `15` | Timeout for step-up approval. |
 | `step_up_poll_interval_seconds` | `int` | `5` | Polling interval for step-up hold status. |
 | `session_intent` | `str \| None` | `None` | Session purpose used by intent-scoped compliance packs. |
@@ -784,7 +784,7 @@ if session:
 | `THOTH_TENANT_ID` | Tenant identifier used by your application to pass `tenant_id` into SDK APIs (the SDK does not auto-read this by itself). |
 | `THOTH_API_KEY` | API key from the Aten dashboard. Enables HTTPS event transport. Example: `thoth_live_abc123...` |
 | `THOTH_EVENT_INGEST_TOKEN` | Optional dedicated telemetry token for `/v1/events/batch` (`X-Thoth-Event-Ingest-Token` header). |
-| `THOTH_API_URL` | Required tenant API base URL for both event ingestion and policy checks. Example: `https://enforce.<tenant>.<apex-domain>` |
+| `THOTH_API_URL` | Tenant API base URL for both event ingestion and policy checks. Defaults to `https://api.atensecurity.com` (trial and self-serve); Enterprise example: `https://enforce.<tenant>.<apex-domain>` |
 | `THOTH_ENVIRONMENT` | Optional environment selector (`prod`, `staging`, `dev`, etc.) sent to the enforcer payload. |
 | `THOTH_FAIL_OPEN` | Optional fail-open switch (`true/false`). When true, enforcer `network/429/5xx` failures return `ALLOW`; auth failures still block. |
 | `THOTH_LOG_LEVEL` | Optional SDK logger level override (`DEBUG`, `INFO`, `WARNING`, `ERROR`). If unset, SDK falls back to `LOG_LEVEL` when present. |

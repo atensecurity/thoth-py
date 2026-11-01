@@ -269,3 +269,19 @@ def test_frameworks_limits_the_hooks(server):
     assert thoth.init(frameworks=[]) == []
     list_orders.invoke({"account": "H"})
     assert server.checks == []
+
+
+def test_init_defaults_to_api_atensecurity_com(monkeypatch):
+    """Trial and self-serve workspaces need no THOTH_API_URL; Enterprise sets its own host."""
+    for name, value in ENV.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("THOTH_API_URL")
+    seen = []
+    monkeypatch.setattr(auto, "enforcer_http_clients", lambda config: seen.append(config.resolved_api_url) or FakeThoth().clients(config))
+    monkeypatch.setattr(auto, "HttpEmitter", MagicMock())
+    monkeypatch.setattr(auto, "publish_tool_inventory", MagicMock())
+    try:
+        thoth.init()
+        assert auto._RUNTIME.config.resolved_api_url == "https://api.atensecurity.com"
+    finally:
+        thoth.shutdown()

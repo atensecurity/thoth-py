@@ -38,15 +38,17 @@ def test_behavioral_event_construction():
     assert event.ttl > 0  # auto-set to 90 days
 
 
-def test_thoth_config_defaults():
+def test_thoth_config_defaults(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("THOTH_API_URL", raising=False)
     config = ThothConfig(
         agent_id="my-agent",
         approved_scope=["read:data"],
         tenant_id="trantor",
     )
     assert config.enforcement == EnforcementMode.BLOCK
-    with pytest.raises(ValueError, match="Thoth API URL is required"):
-        _ = config.resolved_enforcer_url
+    # Trial and self-serve workspaces; Enterprise sets its own host.
+    assert config.resolved_api_url == "https://api.atensecurity.com"
+    assert config.resolved_enforcer_url == "https://api.atensecurity.com"
 
 
 def test_thoth_config_resolved_enforcer_url_matches_api_url():

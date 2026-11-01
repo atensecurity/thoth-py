@@ -8,6 +8,8 @@ from urllib.parse import quote
 
 import httpx
 
+from thoth.models import DEFAULT_API_URL
+
 _VALUE_KEYS = {"default", "examples", "example", "const", "enum"}
 
 
@@ -59,7 +61,7 @@ def _publish(agent: Any, tenant_id: str, agent_id: str, base: str, key: str | No
 
 
 def publish_tool_inventory(agent: Any, *, tenant_id: str, agent_id: str, api_url: str | None, api_key: str | None) -> None:
-    base = (api_url or os.getenv("THOTH_API_URL") or "").rstrip("/")
+    base = ((api_url or os.getenv("THOTH_API_URL") or "").strip() or DEFAULT_API_URL).rstrip("/")
     if not base or os.getenv("THOTH_TOOL_INVENTORY", "").lower() == "off":
         return
     try:

@@ -9,7 +9,7 @@ from thoth._context import _CURRENT_SESSION
 from thoth.emitter import HttpEmitter
 from thoth.enforcer_client import EnforcerClient
 from thoth.logging_config import configure_thoth_logging_from_env
-from thoth.models import EnforcementMode, ThothConfig
+from thoth.models import DEFAULT_API_URL, EnforcementMode, ThothConfig
 from thoth.session import SessionContext
 from thoth.step_up import StepUpClient
 from thoth.tool_inventory import publish_tool_inventory
@@ -245,9 +245,7 @@ def _build_components(
     configure_thoth_logging_from_env()
     resolved_api_key = api_key or os.getenv("THOTH_API_KEY")
     resolved_event_ingest_token = event_ingest_token or os.getenv("THOTH_EVENT_INGEST_TOKEN")
-    resolved_api_url = (api_url or os.getenv("THOTH_API_URL") or "").strip()
-    if not resolved_api_url:
-        raise ValueError("Thoth API URL is required (pass api_url or set THOTH_API_URL)")
+    resolved_api_url = (api_url or os.getenv("THOTH_API_URL") or "").strip() or DEFAULT_API_URL
     resolved_environment = (environment or os.getenv("THOTH_ENVIRONMENT") or "prod").strip().lower() or "prod"
     config = ThothConfig(
         agent_id=agent_id,
