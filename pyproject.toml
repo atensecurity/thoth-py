@@ -21,7 +21,7 @@ description = "AI agent governance SDK by Aten Security"
 name = "atensec-thoth"
 packages = [{include = "thoth"}]
 readme = "README.md"
-version = "0.7.0"
+version = "0.6.0"
 
 [tool.poetry.dependencies]
 ag2 = {version = ">=1.0", optional = true}
