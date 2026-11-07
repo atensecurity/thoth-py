@@ -1,8 +1,10 @@
 """The AgentCore reference agent (platform/public/thoth-agentcore-reference): ALLOW runs, DENY never runs, a hold waits."""
 
+import base64
 from http.server import ThreadingHTTPServer
 import importlib
 import json
+import os
 from pathlib import Path
 import sys
 import threading
@@ -99,8 +101,16 @@ def server(monkeypatch, reference):
     thoth.shutdown()
 
 
+@pytest.fixture(autouse=True)
+def caller(monkeypatch):
+    monkeypatch.setenv("THOTH_USER_ID", "service@acme.test")
+    monkeypatch.delenv("AGENT_ALLOW_PAYLOAD_USER", raising=False)
+    monkeypatch.delenv("AGENT_CALLER_HEADER", raising=False)
+    monkeypatch.delenv("AGENT_CALLER_JWT_CLAIM", raising=False)
+
+
 def ask(reference, prompt):
-    return reference.agent.invoke({"prompt": prompt, "user_id": "nurse@acme.test"}, "session-1", stub=True)["response"]
+    return reference.agent.invoke({"prompt": prompt}, "session-1", stub=True)["response"]
 
 
 def test_an_allowed_call_runs(reference, server):
@@ -179,3 +189,61 @@ def test_the_key_is_read_from_secrets_manager_only_when_not_already_set(referenc
     monkeypatch.setenv("THOTH_API_KEY", "already-set")
     reference.agent.load_api_key_from_secrets_manager(secrets)
     assert secrets.calls == ["thoth/clinic-scheduler"]
+
+
+def _jwt(claims):
+    body = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    return f"x.{body}.y"
+
+
+def test_payload_user_id_is_ignored_without_the_demo_flag(reference, server):
+    assert reference.agent.resolve_user({"user_id": "attacker@evil.test"}, {}) == "service@acme.test"
+
+
+def test_a_verified_header_or_claim_is_used(reference, server, monkeypatch):
+    monkeypatch.setenv("AGENT_CALLER_HEADER", "X-Verified-Caller")
+    headers = {"X-Verified-Caller": "nurse@acme.test"}
+    assert reference.agent.verified_caller(headers) == "nurse@acme.test"
+    assert reference.agent.resolve_user({"user_id": "attacker@evil.test"}, headers) == "nurse@acme.test"
+
+    monkeypatch.delenv("AGENT_CALLER_HEADER")
+    monkeypatch.setenv("AGENT_CALLER_JWT_CLAIM", "sub")
+    bearer = {"Authorization": f"Bearer {_jwt({'sub': 'doc@acme.test'})}"}
+    assert reference.agent.verified_caller(bearer) == "doc@acme.test"
+    assert reference.agent.verified_caller({"Authorization": "Bearer garbage"}) is None
+    assert reference.agent.verified_caller({}) is None
+
+
+def test_missing_identity_fails_closed_with_401(reference, server, monkeypatch):
+    monkeypatch.delenv("THOTH_USER_ID")
+    with pytest.raises(reference.agent.CallerRequired):
+        ask(reference, "list appointments")
+    assert reference.tools.executed == []
+
+    http = ThreadingHTTPServer(("127.0.0.1", 0), reference.agent.make_handler(stub=True))
+    threading.Thread(target=http.serve_forever, daemon=True).start()
+    try:
+        reply = httpx.post(f"http://127.0.0.1:{http.server_address[1]}/invocations", json={"prompt": "list appointments", "user_id": "attacker@evil.test"})
+        assert reply.status_code == 401
+        assert reference.tools.executed == []
+    finally:
+        http.shutdown()
+
+
+def test_the_local_demo_may_take_the_body_user_and_warns(reference, server, monkeypatch, capsys):
+    monkeypatch.setenv("AGENT_ALLOW_PAYLOAD_USER", "1")
+    assert reference.agent.resolve_user({"user_id": "demo@acme.test"}, {}) == "demo@acme.test"
+    assert "demo only" in capsys.readouterr().err
+
+
+def test_local_mode_sets_the_demo_flag_and_still_works(reference, monkeypatch, capsys):
+    for name in ("THOTH_USER_ID", "THOTH_API_KEY", "THOTH_AGENT_ID", "THOTH_TENANT_ID"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(reference.agent.thoth, "init", lambda: ["strands"])
+    reference.agent.start_governance(local=True)
+    try:
+        assert os.environ["AGENT_ALLOW_PAYLOAD_USER"] == "1"
+        monkeypatch.setenv("AGENT_ALLOW_PAYLOAD_USER", "1")
+        assert reference.agent.resolve_user({"prompt": "x"}, {}) == "clinician@example.com"
+    finally:
+        monkeypatch.delenv("AGENT_ALLOW_PAYLOAD_USER", raising=False)
