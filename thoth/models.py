@@ -177,11 +177,11 @@ class ThothConfig(BaseModel):
 
     @property
     def resolved_api_url(self) -> str:
-        """Ingest/events API base URL: THOTH_API_URL env var > api_url field."""
-        if override := os.getenv("THOTH_API_URL"):
-            return override.rstrip("/")
-        if self.api_url:
-            return self.api_url.rstrip("/")
+        """Ingest/events API base URL: api_url field > THOTH_API_URL env var > default."""
+        if self.api_url and self.api_url.strip():
+            return self.api_url.strip().rstrip("/")
+        if fallback := (os.getenv("THOTH_API_URL") or "").strip():
+            return fallback.rstrip("/")
         return DEFAULT_API_URL
 
     @property
@@ -309,6 +309,13 @@ class EnforcementDecision(BaseModel):
             raw = payload.get("authorization_decision")
         key = str(raw or "").strip().upper()
         payload["decision"] = _DECISION_ALIASES.get(key, DecisionType.BLOCK)
+        # The enforcer carries an argument modification as decision=ALLOW next to
+        # authorization_decision=MODIFY. Routing on decision alone would run the
+        # tool with its original arguments, so a MODIFY beside an ALLOW is a MODIFY.
+        # A stricter routing decision (BLOCK, STEP_UP, DEFER) is never relaxed.
+        authorization_key = str(payload.get("authorization_decision") or "").strip().upper()
+        if payload["decision"] == DecisionType.ALLOW and _DECISION_ALIASES.get(authorization_key) == DecisionType.MODIFY:
+            payload["decision"] = DecisionType.MODIFY
         if not payload.get("reason"):
             if payload["decision"] == DecisionType.MODIFY:
                 payload["reason"] = payload.get("modification_reason")

@@ -1,11 +1,15 @@
 # tests/test_tracer.py
+import dataclasses
+import enum
 import json
 import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
+from pydantic import BaseModel
 import pytest
 import respx
+
 from thoth import ThothPolicyViolation
 from thoth.emitter import SqsEmitter
 from thoth.enforcer_client import EnforcerClient
@@ -13,7 +17,7 @@ from thoth.models import DecisionType, EnforcementDecision, EnforcementMode, Eve
 from thoth.session import SessionContext
 from thoth.step_up import StepUpClient, _coerce_hold_payload
 from thoth.telemetry import telemetry_event
-from thoth.tracer import Tracer
+from thoth.tracer import ToolArgumentsTooLargeError, Tracer, _to_jsonable
 
 
 @pytest.fixture
@@ -679,6 +683,36 @@ def test_modify_rewrites_tool_args(config):
     assert post_event.metadata["decision_reason_code"] == "minimum_necessary_transform"
 
 
+def _server_modify_decision(routing: str = "ALLOW") -> EnforcementDecision:
+    # The enforcer's real wire shape: argument modification is carried by
+    # authorization_decision, next to the routing decision it left unchanged.
+    return EnforcementDecision.model_validate(
+        {
+            "decision": routing,
+            "authorization_decision": "MODIFY",
+            "decision_reason_code": "outbound_dlp_redaction",
+            "modified_tool_args": {"input": "[REDACTED]"},
+        }
+    )
+
+
+def test_allow_with_authorization_modify_runs_the_tool_with_modified_args(config):
+    session = SessionContext(config)
+    emitter = MagicMock(spec=SqsEmitter)
+    enforcer = MagicMock(spec=EnforcerClient)
+    enforcer.check.return_value = _server_modify_decision("ALLOW")
+
+    t = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=MagicMock(spec=StepUpClient))
+    tool = MagicMock(return_value="ok")
+    assert t.wrap_tool("write:slack", tool)("password=hunter2") == "ok"
+    tool.assert_called_once_with("[REDACTED]")
+
+
+@pytest.mark.parametrize("routing", ["BLOCK", "STEP_UP", "DEFER"])
+def test_a_stricter_routing_decision_is_not_relaxed_by_authorization_modify(routing):
+    assert _server_modify_decision(routing).decision == DecisionType(routing)
+
+
 @pytest.mark.asyncio
 async def test_async_modify_rewrites_tool_args_once_and_preserves_decision(config):
     emitter = MagicMock(spec=SqsEmitter)
@@ -736,8 +770,10 @@ def test_observe_mode_allows_out_of_scope(config):
     config.enforcement = EnforcementMode.OBSERVE
     session = SessionContext(config)
     emitter = MagicMock(spec=SqsEmitter)
-    # Enforcer not called in observe mode
+    # Observe still asks the enforcer (it records what it would have done) but
+    # never acts on the answer.
     enforcer = MagicMock(spec=EnforcerClient)
+    enforcer.check.return_value = EnforcementDecision(decision=DecisionType.BLOCK, reason="would block")
     step_up = MagicMock(spec=StepUpClient)
 
     t = Tracer(config=config, session=session, emitter=emitter, enforcer=enforcer, step_up=step_up)
@@ -745,7 +781,8 @@ def test_observe_mode_allows_out_of_scope(config):
     wrapped = t.wrap_tool("write:s3", tool)
     result = wrapped()
     assert result == "ok"
-    enforcer.check.assert_not_called()
+    enforcer.check.assert_called_once()
+    step_up.wait.assert_not_called()
     post_event = emitter.emit.call_args_list[-1].args[0]
     assert "authorization_decision" not in post_event.metadata
     assert "decision_reason_code" not in post_event.metadata
@@ -762,6 +799,7 @@ async def test_observe_mode_async_post_has_no_fabricated_decision(config):
     config.enforcement = EnforcementMode.OBSERVE
     emitter = MagicMock(spec=SqsEmitter)
     enforcer = MagicMock(spec=EnforcerClient)
+    enforcer.acheck = AsyncMock(return_value=EnforcementDecision(decision=DecisionType.BLOCK, reason="would block"))
     tracer = Tracer(
         config=config,
         session=SessionContext(config),
@@ -774,7 +812,7 @@ async def test_observe_mode_async_post_has_no_fabricated_decision(config):
         return "ok"
 
     assert await tracer.wrap_tool("write:s3", tool)() == "ok"
-    enforcer.acheck.assert_not_called()
+    enforcer.acheck.assert_awaited_once()
     post_event = emitter.emit.call_args_list[-1].args[0]
     assert "authorization_decision" not in post_event.metadata
     assert "decision_reason_code" not in post_event.metadata
@@ -878,3 +916,236 @@ def test_log_decision_excludes_hold_token(config, caplog):
 
     assert "hold_token=tok_step_up_123" not in caplog.text
     assert "decision=STEP_UP" in caplog.text
+
+
+class _Color(enum.Enum):
+    RED = "red"
+
+
+@dataclasses.dataclass
+class _Envelope:
+    to: str
+    cc: list[str]
+
+
+def test_to_jsonable_keeps_structure_the_policy_reads() -> None:
+    class Message(BaseModel):
+        to: str
+
+    deep: dict[str, object] = {"to": "outside@example.com"}
+    for _ in range(20):
+        deep = {"next": deep}
+
+    out = _to_jsonable(
+        {
+            "model": Message(to="a@example.com"),
+            "envelope": _Envelope(to="b@example.com", cc=["c@example.com"]),
+            "bcc": {"d@example.com"},
+            "color": _Color.RED,
+            "deep": deep,
+        }
+    )
+
+    assert out["model"] == {"to": "a@example.com"}
+    assert out["envelope"] == {"to": "b@example.com", "cc": ["c@example.com"]}
+    assert out["bcc"] == ["d@example.com"]
+    assert out["color"] == "red"
+    node = out["deep"]
+    for _ in range(20):
+        node = node["next"]
+    assert node == {"to": "outside@example.com"}
+
+
+def test_to_jsonable_keeps_content_past_the_depth_limit() -> None:
+    deep: dict[str, object] = {"to": "far@example.com"}
+    for _ in range(100):
+        deep = {"next": deep}
+
+    assert "far@example.com" in str(_to_jsonable(deep))
+
+
+def test_to_jsonable_marks_cycles_instead_of_recursing() -> None:
+    loop: dict[str, object] = {"to": "a@example.com"}
+    loop["self"] = loop
+
+    assert _to_jsonable(loop) == {"to": "a@example.com", "self": "[circular]"}
+
+
+def test_to_jsonable_does_not_walk_arbitrary_objects() -> None:
+    class Client:
+        def __init__(self) -> None:
+            self.api_key = "sk-secret"
+
+    out = _to_jsonable({"client": Client()})
+
+    assert "sk-secret" not in str(out)
+
+
+def test_to_jsonable_keeps_every_dataclass_field_the_policy_may_read() -> None:
+    @dataclasses.dataclass
+    class Draft:
+        owner: str
+        recipient: str = dataclasses.field(default="out@example.com", repr=False)
+        _route: str = "relay"
+
+    assert _to_jsonable(Draft(owner="a")) == {
+        "owner": "a",
+        "recipient": "out@example.com",
+        "_route": "relay",
+    }
+
+
+def test_to_jsonable_walks_a_model_dump_that_is_not_a_dict() -> None:
+    class Wrapped(BaseModel):
+        pass
+
+    class Listing(Wrapped):
+        def model_dump(self, *args: object, **kwargs: object) -> list[str]:  # type: ignore[override]
+            return ["a@example.com", "b@example.com"]
+
+    assert _to_jsonable(Listing()) == ["a@example.com", "b@example.com"]
+
+
+def test_to_jsonable_refuses_an_exploding_shared_structure() -> None:
+    node: list[object] = []
+    for _ in range(40):
+        node = [node, node]
+
+    with pytest.raises(ToolArgumentsTooLargeError):
+        _to_jsonable(node)
+
+
+def _modify_tracer(config, check_result, *, wait_result=None):
+    enforcer = MagicMock(spec=EnforcerClient)
+    enforcer.check.return_value = check_result
+    step_up = MagicMock(spec=StepUpClient)
+    if wait_result is not None:
+        step_up.wait.return_value = wait_result
+    return Tracer(
+        config=config,
+        session=SessionContext(config),
+        emitter=MagicMock(spec=SqsEmitter),
+        enforcer=enforcer,
+        step_up=step_up,
+    )
+
+
+def test_modify_is_applied_to_a_keyword_only_call(config):
+    t = _modify_tracer(
+        config,
+        EnforcementDecision.model_validate(
+            {
+                "decision": "ALLOW",
+                "authorization_decision": "MODIFY",
+                "modified_tool_args": {"to": "a@example.com", "body": "[REDACTED]"},
+            }
+        ),
+    )
+    tool = MagicMock(return_value="ok")
+
+    assert t.wrap_tool("send:email", tool)(to="a@example.com", body="card 4111 1111 1111 1111") == "ok"
+
+    tool.assert_called_once_with(to="a@example.com", body="[REDACTED]")
+
+
+def test_a_held_call_that_is_approved_runs_with_the_arguments_redacted_when_it_was_held(config):
+    held = EnforcementDecision.model_validate(
+        {
+            "decision": "STEP_UP",
+            "authorization_decision": "STEP_UP",
+            "hold_token": "tok_1",
+            "modified_tool_args": {"to": "out@example.com", "body": "[REDACTED]"},
+        }
+    )
+    t = _modify_tracer(config, held, wait_result=EnforcementDecision(decision=DecisionType.ALLOW))
+    tool = MagicMock(return_value="ok")
+
+    assert t.wrap_tool("send:email", tool)(to="out@example.com", body="card 4111 1111 1111 1111") == "ok"
+
+    tool.assert_called_once_with(to="out@example.com", body="[REDACTED]")
+
+
+def test_a_held_call_that_is_approved_without_redaction_runs_unchanged(config):
+    held = EnforcementDecision.model_validate({"decision": "STEP_UP", "hold_token": "tok_1"})
+    t = _modify_tracer(config, held, wait_result=EnforcementDecision(decision=DecisionType.ALLOW))
+    tool = MagicMock(return_value="ok")
+
+    t.wrap_tool("send:email", tool)(to="out@example.com")
+
+    tool.assert_called_once_with(to="out@example.com")
+
+
+@pytest.mark.parametrize("modified", [None, {}, {"unrelated": 1}])
+def test_a_modification_the_sdk_cannot_apply_does_not_run_the_tool(config, modified):
+    t = _modify_tracer(
+        config,
+        EnforcementDecision.model_validate(
+            {"decision": "ALLOW", "authorization_decision": "MODIFY", "modified_tool_args": modified}
+        ),
+    )
+    tool = MagicMock(return_value="ok")
+
+    with pytest.raises(ThothPolicyViolation):
+        t.wrap_tool("send:email", tool)("a@example.com", "second positional")
+
+    tool.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_held_call_that_is_approved_runs_with_the_arguments_redacted_when_it_was_held(config):
+    held = EnforcementDecision.model_validate(
+        {"decision": "STEP_UP", "hold_token": "tok_1", "modified_tool_args": {"body": "[REDACTED]"}}
+    )
+    enforcer = MagicMock(spec=EnforcerClient)
+    enforcer.acheck = AsyncMock(return_value=held)
+    enforcer.aexplain = AsyncMock(return_value=None)
+    step_up = MagicMock(spec=StepUpClient)
+    step_up.await_decision = AsyncMock(return_value=EnforcementDecision(decision=DecisionType.ALLOW))
+    t = Tracer(
+        config=config,
+        session=SessionContext(config),
+        emitter=MagicMock(spec=SqsEmitter),
+        enforcer=enforcer,
+        step_up=step_up,
+    )
+    calls = []
+
+    async def tool(**kwargs):
+        calls.append(kwargs)
+        return "ok"
+
+    assert await t.wrap_tool("send:email", tool)(body="card 4111") == "ok"
+    assert calls == [{"body": "[REDACTED]"}]
+
+
+def test_observe_mode_runs_the_call_when_the_enforcer_fails(config):
+    config.enforcement = EnforcementMode.OBSERVE
+    enforcer = MagicMock(spec=EnforcerClient)
+    enforcer.check.side_effect = RuntimeError("enforcer down")
+    t = Tracer(
+        config=config,
+        session=SessionContext(config),
+        emitter=MagicMock(spec=SqsEmitter),
+        enforcer=enforcer,
+        step_up=MagicMock(spec=StepUpClient),
+    )
+    tool = MagicMock(return_value="ok")
+
+    assert t.wrap_tool("write:s3", tool)("x") == "ok"
+    tool.assert_called_once_with("x")
+
+
+def test_observe_mode_ignores_a_hold_and_a_modification(config):
+    config.enforcement = EnforcementMode.OBSERVE
+    enforcer = MagicMock(spec=EnforcerClient)
+    enforcer.check.return_value = EnforcementDecision.model_validate(
+        {"decision": "STEP_UP", "hold_token": "tok_1", "modified_tool_args": {"input": "[REDACTED]"}}
+    )
+    step_up = MagicMock(spec=StepUpClient)
+    t = Tracer(config=config, session=SessionContext(config), emitter=MagicMock(spec=SqsEmitter), enforcer=enforcer, step_up=step_up)
+    tool = MagicMock(return_value="ok")
+
+    assert t.wrap_tool("send:email", tool)("original") == "ok"
+
+    tool.assert_called_once_with("original")
+    step_up.wait.assert_not_called()

@@ -63,7 +63,7 @@ def test_thoth_config_resolved_enforcer_url_matches_api_url():
     assert config.resolved_enforcer_url == config.resolved_api_url
 
 
-def test_thoth_config_env_api_url_overrides_field(monkeypatch: pytest.MonkeyPatch):
+def test_thoth_config_api_url_field_wins_over_env(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("THOTH_API_URL", "https://enforce.env.atensecurity.com")
     config = ThothConfig(
         agent_id="my-agent",
@@ -71,7 +71,19 @@ def test_thoth_config_env_api_url_overrides_field(monkeypatch: pytest.MonkeyPatc
         tenant_id="trantor",
         api_url="https://enforce.field.atensecurity.com",
     )
-    assert config.resolved_enforcer_url == "https://enforce.env.atensecurity.com"
+    assert config.resolved_enforcer_url == "https://enforce.field.atensecurity.com"
+
+
+def test_thoth_config_env_api_url_is_used_when_field_is_absent(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("THOTH_API_URL", "https://enforce.env.atensecurity.com/")
+    config = ThothConfig(agent_id="my-agent", approved_scope=["read:data"], tenant_id="trantor")
+    assert config.resolved_api_url == "https://enforce.env.atensecurity.com"
+
+
+def test_thoth_config_falls_back_to_default_when_field_and_env_are_blank(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("THOTH_API_URL", "  ")
+    config = ThothConfig(agent_id="my-agent", approved_scope=["read:data"], tenant_id="trantor", api_url="  ")
+    assert config.resolved_api_url == "https://api.atensecurity.com"
 
 
 @pytest.mark.parametrize(

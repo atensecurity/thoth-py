@@ -52,6 +52,7 @@ _RECEIPT_STRING_FIELDS = {
     "signature",
     "signing_algorithm",
     "key_id",
+    "signature_key_id",
     "schema_version",
 }
 _RECEIPT_DECISION_FIELDS = {"authorization_decision", "decision_reason_code", "outcome"}

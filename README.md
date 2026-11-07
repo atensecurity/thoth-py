@@ -630,7 +630,7 @@ Set via the `enforcement` parameter to `instrument()`.
 
 | Mode | Value | Behavior |
 |---|---|---|
-| Observe | `observe` | All tool calls pass through. Events are still emitted for audit. No blocking, no step-up. Use for initial rollout and baselining. |
+| Observe | `observe` | All tool calls pass through. Each call is still sent to the enforcer, which records what it would have held or blocked, and events are emitted for audit. No blocking, no step-up. Use for initial rollout and baselining. |
 | Step-Up | `step_up` | Suspicious calls trigger a human approval request (e.g. Slack DM to a reviewer). Tool execution is held until approved or timed out. |
 | Block | `block` | Calls that violate policy raise `ThothPolicyViolation` immediately. |
 | Progressive | `progressive` | Escalating mode. Enforcer chooses the appropriate response per tool call based on policy rules. |

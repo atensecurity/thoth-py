@@ -35,6 +35,7 @@ from thoth.models import (
 )
 from thoth.session import SessionContext
 from thoth.step_up import StepUpClient
+from thoth.tracer import ModifiedArgumentsNotApplicableError, _apply_modified_call_args, _modification_to_apply
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -101,43 +102,6 @@ def _result_summary(result: Any) -> dict[str, Any]:
         "result_type": type(result).__name__,
         "result_size_bytes": _payload_size(result),
     }
-
-
-def _apply_modified_call_args(
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    modified_tool_args: dict[str, Any] | None,
-) -> tuple[tuple[Any, ...], dict[str, Any]]:
-    if not isinstance(modified_tool_args, dict) or not modified_tool_args:
-        return args, kwargs
-
-    if "args" in modified_tool_args and isinstance(modified_tool_args["args"], list):
-        mapped_kwargs = kwargs
-        if isinstance(modified_tool_args.get("kwargs"), dict):
-            mapped_kwargs = dict(modified_tool_args["kwargs"])
-        return tuple(modified_tool_args["args"]), mapped_kwargs
-
-    if len(args) == 1 and isinstance(args[0], dict) and not kwargs:
-        return (modified_tool_args,), {}
-
-    if "arg0" in modified_tool_args:
-        return (modified_tool_args["arg0"],), kwargs
-    if "input" in modified_tool_args:
-        return (modified_tool_args["input"],), kwargs
-
-    indexed: list[tuple[int, Any]] = []
-    for key, value in modified_tool_args.items():
-        if not key.startswith("arg"):
-            continue
-        index_text = key[3:]
-        if not index_text.isdigit():
-            continue
-        indexed.append((int(index_text), value))
-    indexed.sort(key=lambda item: item[0])
-    if indexed and indexed[0][0] == 0 and indexed[-1][0] == len(indexed) - 1:
-        return tuple(value for _, value in indexed), kwargs
-
-    return args, kwargs
 
 
 def _decision_context(decision: EnforcementDecision) -> dict[str, Any]:
@@ -717,12 +681,17 @@ class _LangGraphRuntime:
                 decision,
                 fallback_decision=step_up_initial,
             )
-        if decision.is_modify:
-            modified_args, modified_kwargs = _apply_modified_call_args(
-                call_args,
-                call_kwargs,
-                decision.modified_tool_args,
-            )
+        modification = _modification_to_apply(decision, step_up_initial)
+        if modification is not None:
+            try:
+                modified_args, modified_kwargs = _apply_modified_call_args(call_args, call_kwargs, modification)
+            except ModifiedArgumentsNotApplicableError as exc:
+                raise _violation_from_decision(
+                    tool_name,
+                    f"{exc}; the call was not run",
+                    decision,
+                    fallback_decision=step_up_initial,
+                ) from exc
             return modified_args, modified_kwargs, decision
         return call_args, call_kwargs, decision
 
@@ -780,12 +749,17 @@ class _LangGraphRuntime:
                 decision,
                 fallback_decision=step_up_initial,
             )
-        if decision.is_modify:
-            modified_args, modified_kwargs = _apply_modified_call_args(
-                call_args,
-                call_kwargs,
-                decision.modified_tool_args,
-            )
+        modification = _modification_to_apply(decision, step_up_initial)
+        if modification is not None:
+            try:
+                modified_args, modified_kwargs = _apply_modified_call_args(call_args, call_kwargs, modification)
+            except ModifiedArgumentsNotApplicableError as exc:
+                raise _violation_from_decision(
+                    tool_name,
+                    f"{exc}; the call was not run",
+                    decision,
+                    fallback_decision=step_up_initial,
+                ) from exc
             return modified_args, modified_kwargs, decision
         return call_args, call_kwargs, decision
 

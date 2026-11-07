@@ -62,7 +62,9 @@ def _billing_decision(response: httpx.Response) -> EnforcementDecision | None:
 
 
 def enforcer_http_clients(config: ThothConfig) -> tuple[httpx.Client, httpx.AsyncClient]:
-    headers = {"x-api-key": config.api_key} if config.api_key else {}
+    # Both headers: some customer ingress stacks strip or rewrite Authorization
+    # while keeping X-Api-Key, and the enforcer accepts either.
+    headers = {"x-api-key": config.api_key, "Authorization": f"Bearer {config.api_key}"} if config.api_key else {}
     # resolved_enforcer_url follows the single-URL contract and mirrors resolved_api_url.
     enforcer_url = config.resolved_enforcer_url
     return (

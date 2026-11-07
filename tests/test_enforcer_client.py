@@ -251,3 +251,15 @@ def test_explain_returns_none_on_failure(config):
         tool_calls=["write:s3"],
     )
     assert explanation is None
+
+
+@respx.mock
+def test_sends_the_key_in_both_auth_headers():
+    keyed = ThothConfig(agent_id="a", approved_scope=[], tenant_id="t", api_url="http://enforcer:8080", api_key="key-123")
+    route = respx.post("http://enforcer:8080/v1/enforce").mock(return_value=httpx.Response(200, json={"decision": "ALLOW"}))
+
+    EnforcerClient(keyed).check("read:data", session_id="s", tool_calls=[])
+
+    request = route.calls.last.request
+    assert request.headers["x-api-key"] == "key-123"
+    assert request.headers["authorization"] == "Bearer key-123"

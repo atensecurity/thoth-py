@@ -84,6 +84,7 @@ def make_sensitive_event() -> BehavioralEvent:
                 "receipt_id": "receipt-safe-001",
                 "signature": "signature-safe-001",
                 "signing_algorithm": "ED25519",
+                "signature_key_id": "key-safe-001",
                 "audit_envelope": {"auth_context": {"patient": canary}},
                 "decision": {
                     "authorization_decision": "BLOCK",
@@ -202,6 +203,7 @@ def test_http_telemetry_uses_minimal_projection_without_mutating_authorization_e
         "receipt_id": "receipt-safe-001",
         "signature": "signature-safe-001",
         "signing_algorithm": "ED25519",
+        "signature_key_id": "key-safe-001",
         "decision": {"authorization_decision": "BLOCK", "outcome": "blocked"},
     }
     assert sent["metadata"]["decision_evidence"] == {

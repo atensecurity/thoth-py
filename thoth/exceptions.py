@@ -4,6 +4,11 @@
 from typing import Any
 
 
+def _rebuild_violation(cls: type, args: tuple[Any, ...]) -> Exception:
+    """Rebuild an exception without calling its __init__, which needs arguments the message does not carry."""
+    return cls.__new__(cls, *args)
+
+
 class ThothPolicyViolation(Exception):  # noqa: N818
     def __init__(
         self,
@@ -65,6 +70,12 @@ class ThothPolicyViolation(Exception):  # noqa: N818
         self.terminal_receipt = dict(terminal_receipt or {}) if terminal_receipt else None
         self.explanation = explanation
         super().__init__(f"Thoth blocked tool '{tool_name}': {reason}" + (f" (violation_id={violation_id})" if violation_id else ""))
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        # copy and pickle rebuild an exception as type(exc)(*exc.args); args holds only the message,
+        # so a framework that copies it (AG2 does, re-raising from a task) hit a TypeError for the
+        # missing reason. Rebuild without __init__ and restore the fields.
+        return (_rebuild_violation, (type(self), self.args), self.__dict__)
 
 
 class ThothDeferredError(ThothPolicyViolation):

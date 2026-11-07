@@ -1,10 +1,13 @@
 # thoth/tracer.py
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, time
+import enum
 import functools
 import inspect
+import json
 import logging
 from time import perf_counter
 from typing import Any, Callable, cast
@@ -39,17 +42,68 @@ class _EnforcementOutcome:
     initial_decision: EnforcementDecision | None = None
 
 
-def _to_jsonable(value: Any, *, depth: int = 0) -> Any:
-    if depth > 5:
-        return "[truncated]"
+_MAX_JSONABLE_DEPTH = 64
+_MAX_JSONABLE_NODES = 100_000
+
+
+class ToolArgumentsTooLargeError(ValueError):
+    """The tool arguments are too large or too tangled to copy for the policy check."""
+
+
+def _to_jsonable(value: Any) -> Any:
+    """Copy ``value`` into plain JSON types without losing structure.
+
+    The copy is what the enforcer evaluates, while the tool runs on the original
+    objects, so it must keep every field the policy might read (for example the
+    recipient of a message). Models, dataclasses, sets and enums keep their
+    contents, and nothing is replaced by a placeholder: a value nested deeper
+    than the limit is kept as its JSON text and a cycle is marked. Every field of
+    a model or dataclass is kept, as the policy may need any of them. Arbitrary
+    objects are not walked, since they can hold credentials; they become their
+    string form. A value with more than 100,000 nodes (a shared reference
+    repeated until it explodes, for one) raises ``ToolArgumentsTooLargeError`` so the
+    call is refused rather than evaluated on a partial copy.
+    """
+    return _copy_jsonable(value, 0, frozenset(), [_MAX_JSONABLE_NODES])
+
+
+def _copy_jsonable(value: Any, depth: int, seen: frozenset[int], budget: list[int]) -> Any:
+    budget[0] -= 1
+    if budget[0] < 0:
+        raise ToolArgumentsTooLargeError("tool arguments are too large to evaluate")
     if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
-    if isinstance(value, list | tuple):
-        return [_to_jsonable(v, depth=depth + 1) for v in value]
+    if isinstance(value, enum.Enum):
+        return _copy_jsonable(value.value, depth, seen, budget)
+    if isinstance(value, datetime | date | time):
+        return value.isoformat()
+    if id(value) in seen:
+        return "[circular]"
+    if depth > _MAX_JSONABLE_DEPTH:
+        return json.dumps(value, default=str)
+    inner = seen | {id(value)}
     if isinstance(value, dict):
-        return {str(k): _to_jsonable(v, depth=depth + 1) for k, v in value.items()}
+        return {str(k): _copy_jsonable(v, depth + 1, inner, budget) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_copy_jsonable(v, depth + 1, inner, budget) for v in value]
+    if isinstance(value, set | frozenset):
+        items = [_copy_jsonable(v, depth + 1, inner, budget) for v in value]
+        return sorted(items, key=lambda item: json.dumps(item, sort_keys=True, default=str))
+    dump = getattr(value, "model_dump", None)
+    if callable(dump):
+        try:
+            dumped = dump()
+        except Exception:
+            dumped = None
+        if dumped is not None:
+            return _copy_jsonable(dumped, depth + 1, inner, budget)
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {
+            f.name: _copy_jsonable(getattr(value, f.name, None), depth + 1, inner, budget)
+            for f in dataclasses.fields(value)
+        }
     return str(value)
 
 
@@ -78,22 +132,36 @@ def _result_summary(result: Any) -> dict[str, Any]:
     }
 
 
+class ModifiedArgumentsNotApplicableError(ValueError):
+    """The enforcer modified the arguments in a shape the SDK cannot map back onto the call."""
+
+
 def _apply_modified_call_args(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
     modified_tool_args: dict[str, Any] | None,
 ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+    """Map the enforcer's modified arguments back onto the call.
+
+    The shape is decided by how the call was sent (see ``_tool_args_from_call``):
+    a single dict argument, keyword arguments only, or ``{"args": [...], "kwargs": {...}}``.
+    Raises ``ModifiedArgumentsNotApplicableError`` rather than run the original,
+    unmodified arguments when the modification cannot be applied.
+    """
     if not isinstance(modified_tool_args, dict) or not modified_tool_args:
-        return args, kwargs
+        raise ModifiedArgumentsNotApplicableError("the enforcer modified the call but returned no arguments")
+
+    if len(args) == 1 and isinstance(args[0], dict) and not kwargs:
+        return (modified_tool_args,), {}
+
+    if not args and kwargs:
+        return (), dict(modified_tool_args)
 
     if "args" in modified_tool_args and isinstance(modified_tool_args["args"], list):
         mapped_kwargs = kwargs
         if isinstance(modified_tool_args.get("kwargs"), dict):
-            mapped_kwargs = cast(dict[str, Any], modified_tool_args["kwargs"])
+            mapped_kwargs = dict(modified_tool_args["kwargs"])
         return tuple(modified_tool_args["args"]), mapped_kwargs
-
-    if len(args) == 1 and isinstance(args[0], dict) and not kwargs:
-        return (modified_tool_args,), {}
 
     if "arg0" in modified_tool_args:
         return (modified_tool_args["arg0"],), kwargs
@@ -112,7 +180,25 @@ def _apply_modified_call_args(
     if indexed and indexed[0][0] == 0 and indexed[-1][0] == len(indexed) - 1:
         return tuple(value for _, value in indexed), kwargs
 
-    return args, kwargs
+    raise ModifiedArgumentsNotApplicableError("the modified arguments do not match the shape of the call")
+
+
+def _modification_to_apply(
+    decision: EnforcementDecision,
+    step_up_initial: EnforcementDecision | None,
+) -> dict[str, Any] | None:
+    """The modified arguments the call must run with, or None when it runs unchanged.
+
+    A MODIFY decision carries them. A held action that is later approved does too:
+    the hold only returns ALLOW, so the arguments the enforcer redacted when it
+    held the call are on the initial decision. A MODIFY with no arguments yields
+    an empty dict, which ``_apply_modified_call_args`` refuses.
+    """
+    if decision.is_modify:
+        return decision.modified_tool_args or {}
+    if decision.is_allow and step_up_initial is not None and step_up_initial.modified_tool_args:
+        return step_up_initial.modified_tool_args
+    return None
 
 
 def _decision_context(decision: EnforcementDecision) -> dict[str, Any]:
@@ -474,6 +560,7 @@ class Tracer:
         """
         kwargs = dict(call_kwargs or {})
         if self._config.enforcement == EnforcementMode.OBSERVE:
+            self._observe(tool_name, tool_args, action_attestation_id)
             return _EnforcementOutcome(call_args, kwargs, None)
         pending_tool_calls = list(self._session.tool_calls)
         if not pending_tool_calls or pending_tool_calls[-1] != tool_name:
@@ -552,12 +639,18 @@ class Tracer:
                 fallback_decision=step_up_initial,
                 explanation=explanation,
             )
-        if decision.is_modify:
-            effective_args, effective_kwargs = _apply_modified_call_args(
-                call_args,
-                kwargs,
-                decision.modified_tool_args,
-            )
+        modification = _modification_to_apply(decision, step_up_initial)
+        if modification is not None:
+            try:
+                effective_args, effective_kwargs = _apply_modified_call_args(call_args, kwargs, modification)
+            except ModifiedArgumentsNotApplicableError as exc:
+                raise _violation_from_decision(
+                    tool_name,
+                    f"{exc}; the call was not run",
+                    decision,
+                    fallback_decision=step_up_initial,
+                    explanation=explanation,
+                ) from exc
             return _EnforcementOutcome(effective_args, effective_kwargs, decision, step_up_initial)
         return _EnforcementOutcome(call_args, kwargs, decision, step_up_initial)
 
@@ -577,6 +670,7 @@ class Tracer:
         """
         kwargs = dict(call_kwargs or {})
         if self._config.enforcement == EnforcementMode.OBSERVE:
+            await self._aobserve(tool_name, tool_args, action_attestation_id)
             return _EnforcementOutcome(call_args, kwargs, None)
         pending_tool_calls = list(self._session.tool_calls)
         if not pending_tool_calls or pending_tool_calls[-1] != tool_name:
@@ -672,12 +766,18 @@ class Tracer:
                 fallback_decision=step_up_initial,
                 explanation=explanation,
             )
-        if decision.is_modify:
-            effective_args, effective_kwargs = _apply_modified_call_args(
-                call_args,
-                kwargs,
-                decision.modified_tool_args,
-            )
+        modification = _modification_to_apply(decision, step_up_initial)
+        if modification is not None:
+            try:
+                effective_args, effective_kwargs = _apply_modified_call_args(call_args, kwargs, modification)
+            except ModifiedArgumentsNotApplicableError as exc:
+                raise _violation_from_decision(
+                    tool_name,
+                    f"{exc}; the call was not run",
+                    decision,
+                    fallback_decision=step_up_initial,
+                    explanation=explanation,
+                ) from exc
             return _EnforcementOutcome(effective_args, effective_kwargs, decision, step_up_initial)
         return _EnforcementOutcome(call_args, kwargs, decision, step_up_initial)
 
@@ -743,6 +843,47 @@ class Tracer:
             violation_id=violation_id,
         )
         self._emitter.emit(event)
+
+    def _observe(self, tool_name: str, tool_args: dict[str, Any] | None, action_attestation_id: str) -> None:
+        """Ask the enforcer about the call and let it run whatever the answer.
+
+        Observe mode still sends the call to the enforcer: it is the enforcer that
+        records what it would have held or blocked, which is what an operator reads
+        to decide whether an agent is ready to enforce. The answer is only logged;
+        it never blocks, holds or modifies the call, and an enforcer failure is
+        swallowed.
+        """
+        pending_tool_calls = list(self._session.tool_calls)
+        if not pending_tool_calls or pending_tool_calls[-1] != tool_name:
+            pending_tool_calls.append(tool_name)
+        try:
+            decision = self._enforcer.check(
+                tool_name=tool_name,
+                session_id=self._session.session_id,
+                tool_calls=pending_tool_calls,
+                tool_args=tool_args,
+                action_attestation_id=action_attestation_id,
+            )
+            self._log_decision(tool_name, decision, async_path=False, phase="observe", action_attestation_id=action_attestation_id)
+        except Exception:  # noqa: BLE001 - observing must never fail the call
+            logger.warning("thoth: observe-mode enforcer check failed for %s", tool_name, exc_info=True)
+
+    async def _aobserve(self, tool_name: str, tool_args: dict[str, Any] | None, action_attestation_id: str) -> None:
+        """Async twin of ``_observe``."""
+        pending_tool_calls = list(self._session.tool_calls)
+        if not pending_tool_calls or pending_tool_calls[-1] != tool_name:
+            pending_tool_calls.append(tool_name)
+        try:
+            decision = await self._enforcer.acheck(
+                tool_name=tool_name,
+                session_id=self._session.session_id,
+                tool_calls=pending_tool_calls,
+                tool_args=tool_args,
+                action_attestation_id=action_attestation_id,
+            )
+            self._log_decision(tool_name, decision, async_path=True, phase="observe", action_attestation_id=action_attestation_id)
+        except Exception:  # noqa: BLE001 - observing must never fail the call
+            logger.warning("thoth: observe-mode enforcer check failed for %s", tool_name, exc_info=True)
 
     def _log_decision(
         self,

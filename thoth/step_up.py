@@ -73,7 +73,7 @@ def _approval_notice(payload: Any) -> str | None:
 
 
 def step_up_http_clients(config: ThothConfig) -> tuple[httpx.Client, httpx.AsyncClient]:
-    headers = {"Authorization": f"Bearer {config.api_key}"} if config.api_key else {}
+    headers = {"Authorization": f"Bearer {config.api_key}", "x-api-key": config.api_key} if config.api_key else {}
     return (
         httpx.Client(base_url=config.resolved_enforcer_url, timeout=_HTTP_TIMEOUT, headers=headers),
         httpx.AsyncClient(base_url=config.resolved_enforcer_url, timeout=_HTTP_TIMEOUT, headers=headers),

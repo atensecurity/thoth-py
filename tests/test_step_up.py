@@ -163,3 +163,23 @@ async def test_async_wait_prints_the_approval_link_once(config, monkeypatch, cap
 
     assert decision.is_block
     assert len(_approval_notices(caplog)) == 1
+
+
+@respx.mock
+def test_hold_poll_sends_the_key_in_both_auth_headers():
+    keyed = ThothConfig(
+        agent_id="a",
+        approved_scope=[],
+        tenant_id="t",
+        api_url="http://enforcer:8080",
+        api_key="key-123",
+        step_up_timeout_minutes=1,
+        step_up_poll_interval_seconds=1,
+    )
+    route = respx.get("http://enforcer:8080/v1/enforce/hold/tok_1").mock(return_value=httpx.Response(200, json={"resolved": True, "resolution": "ALLOW"}))
+
+    StepUpClient(keyed).wait("tok_1")
+
+    request = route.calls.last.request
+    assert request.headers["x-api-key"] == "key-123"
+    assert request.headers["authorization"] == "Bearer key-123"

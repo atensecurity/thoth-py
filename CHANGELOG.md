@@ -4,6 +4,60 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ## Unreleased
 
+## 0.7.0 - 2026-11-06
+
+### Fixed
+
+- `ThothPolicyViolation` and `ThothDeferredError` can be copied and pickled. A
+  framework that re-raises the exception from a task (AG2 does) rebuilt it from
+  its message alone and failed with `TypeError: ... missing 1 required positional
+  argument: 'reason'`, so a refused call surfaced as that error instead of
+  telling the model the call was refused.
+- Observe mode now sends each call to the enforcer, as the product defines
+  observe (evaluate, record what would have been held or blocked, allow). The
+  SDK used to skip the enforcer entirely when `enforcement="observe"`, so those
+  agents produced no "would have blocked" data and the ready-to-enforce checks
+  had nothing to read. The tool always runs with its original arguments, a hold
+  or modification in the answer is ignored, and an enforcer failure never fails
+  the call.
+- Enforce, explain and hold-status requests send the API key in both
+  `X-Api-Key` and `Authorization: Bearer`, as event ingestion already does. The
+  SDK sent only `X-Api-Key` to enforce and only Bearer to the hold poll, so
+  behind an ingress that strips one of them either every call was blocked or a
+  held call could never be approved.
+- A call the enforcer modifies now runs with the modified arguments in every call
+  shape. Keyword-only calls (`fn(to=..., body=...)`) used to run with the original
+  arguments, because only positional and single-dict calls were mapped. A held
+  call that is then approved also runs with the arguments the enforcer redacted
+  when it held the call (the approval used to start the original call). A
+  modification the SDK cannot map back onto the call, or one that arrives with no
+  arguments, now refuses the call with a `ThothPolicyViolation` instead of running
+  the original arguments.
+- Event telemetry now includes the receipt's `signature_key_id`, the field the
+  enforcer uses for the signing key. The allow-list only had `key_id`, so the
+  key never reached events.
+- The copy of the tool arguments sent to the enforcer no longer loses
+  structure. Pydantic models, dataclasses, sets and enums keep their contents
+  (they used to become a plain string), and nothing nested up to 64 levels is
+  replaced by `"[truncated]"`; deeper values are kept as JSON text. The tool
+  still runs on your original objects, so a policy can now see the same fields
+  the tool does, such as the recipient of a message. Arbitrary objects (a client,
+  a session) are not walked, since they can hold credentials, and a model's or
+  dataclass's every field is kept. Arguments with more than
+  100,000 values, such as one shared object repeated until it explodes, raise
+  `ToolArgumentsTooLargeError` and the call does not run.
+- A call the enforcer allows with its arguments redacted or filtered (outbound
+  DLP redaction, or purpose-limited retrieval) now runs with the modified
+  arguments. The enforcer sends that as `decision` ALLOW next to
+  `authorization_decision` MODIFY, and the SDK used to read only `decision`, so the
+  tool ran with the original arguments while the decision log said MODIFY. A
+  stricter `decision` (BLOCK, STEP_UP or DEFER) still wins. Update to get the
+  redaction applied; the TypeScript SDK was not affected.
+- `wrap_autogen_tools` takes the Thoth settings (`agent_id`, `tenant_id`,
+  `approved_scope` and the rest) as its docstring showed; it used to accept
+  only a tracer, so the documented example raised `TypeError`. Passing a
+  tracer still works. It is for AutoGen 0.2-style function maps (AG2 0.x).
+
 ### Added
 
 - `thoth.init()` now also governs the Anthropic client's tools: every tool
@@ -23,6 +77,11 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ### Changed
 
+- An explicit `api_url` now wins over `THOTH_API_URL`, then the environment
+  variable, then the default `https://api.atensecurity.com`, the same order the
+  TypeScript and Go SDKs use. `ThothConfig` used to let the environment variable
+  override a value passed in config, so a workload that sets both now talks to
+  the `api_url` it passed. Blank values are ignored.
 - The `autogen` extra now installs AG2 (`ag2>=1.0`), and an `ag2` extra is
   added. It used to install `pyautogen`, which is now a proxy for Microsoft's
   `autogen-agentchat`, an API Thoth didn't govern. For Microsoft's agents,
@@ -30,15 +89,7 @@ All notable changes to `atensec-thoth` are documented in this file.
 - `api_url` defaults to `https://api.atensecurity.com`, the API for trial and
   self-serve workspaces, when neither `api_url` nor `THOTH_API_URL` is set,
   including for `thoth.init()`. Previously the SDK refused to start without
-  one. Enterprise workspaces keep setting their own host; an explicit value
-  always wins.
-
-### Fixed
-
-- `wrap_autogen_tools` takes the Thoth settings (`agent_id`, `tenant_id`,
-  `approved_scope` and the rest) as its docstring showed; it used to accept
-  only a tracer, so the documented example raised `TypeError`. Passing a
-  tracer still works. It is for AutoGen 0.2-style function maps (AG2 0.x).
+  one. Enterprise workspaces keep setting their own host.
 
 ## 0.6.0 - 2026-10-31
 
