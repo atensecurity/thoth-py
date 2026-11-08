@@ -88,6 +88,7 @@ import hashlib
 import importlib
 import inspect
 import json
+import logging
 import os
 import threading
 from types import SimpleNamespace
@@ -107,6 +108,8 @@ from thoth.session import SessionContext
 from thoth.step_up import StepUpClient, step_up_http_clients
 from thoth.tool_inventory import publish_tool_inventory
 from thoth.tracer import Tracer, _tool_args_from_call
+
+logger = logging.getLogger(__name__)
 
 # Sessions named by the caller (acting_for(..., session_id=...)) whose block has
 # ended, kept so a later request resuming them continues their tool-call
@@ -1242,6 +1245,10 @@ def _install_anthropic() -> Callable[[], None] | None:
     try:
         tools = importlib.import_module("anthropic.lib.tools")
     except ImportError:
+        return None
+    if not hasattr(tools, "ToolError"):
+        # anthropic 0.x: tools can't raise a refusal the runner understands, so they are left ungoverned.
+        logger.warning("Anthropic tools are NOT governed: the installed anthropic SDK predates ToolError. Upgrade to anthropic 1.x for Thoth to check their calls.")
         return None
     root_names = ("BetaFunctionTool", "BetaAsyncFunctionTool", "BetaBuiltinFunctionTool", "BetaAsyncBuiltinFunctionTool")
     roots: list[type[Any]] = [root for root in (getattr(tools, name, None) for name in root_names) if isinstance(root, type)]

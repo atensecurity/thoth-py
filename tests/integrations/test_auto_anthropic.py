@@ -9,7 +9,10 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
+# anthropic 1.x has ToolError and talks through httpx2; the shared libs environment pins 0.x, which has neither.
+pytest.importorskip("anthropic", minversion="1.0.0")
 pytest.importorskip("anthropic.lib.tools")
+pytest.importorskip("httpx2")
 
 import anthropic
 from anthropic.lib.tools import BetaAbstractMemoryTool, ToolError, beta_async_tool, beta_tool
