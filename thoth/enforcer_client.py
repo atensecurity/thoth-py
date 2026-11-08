@@ -10,6 +10,7 @@ import uuid
 import httpx
 
 from thoth.http_diagnostics import auth_failure_hint, extract_http_error_detail
+from thoth.local_scan import load_scanner
 from thoth.logging_config import configure_thoth_logging_from_env
 from thoth.models import DecisionType, EnforcementDecision, HumanExplanation, ThothConfig
 
@@ -154,6 +155,14 @@ class EnforcerClient:
             payload["auth_context"] = auth_context
         if self._config.delegation_context:
             payload["delegation_context"] = dict(self._config.delegation_context)
+        if self._data_handling is not None and self._data_handling.tool_arguments is not None and self._config.data_handling_local_scan is not False:
+            # Scan the raw arguments before they are withheld. Only counts, categories,
+            # hostnames and recipient domains are reported; a check that cannot finish is
+            # left out so Thoth sees it as missing rather than clean.
+            scanner = load_scanner()
+            findings = scanner.client_findings(tool_name, tool_args if tool_args is not None else {}, metadata or None) if scanner is not None else None
+            if findings is not None:
+                payload["client_findings"] = findings
         if self._data_handling is not None:
             # Last, so nothing added above reaches the wire untransformed. The
             # explain payload is built on this one, so it is covered too.

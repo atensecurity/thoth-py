@@ -764,6 +764,7 @@ Or set the environment, which every entry point reads (`init()`, `instrument*()`
 | `THOTH_DATA_HANDLING_TOOL_ARGUMENTS` | `hash`, `redact`, `drop` | What happens to tool-argument values before the request leaves the process. |
 | `THOTH_DATA_HANDLING_PROMPTS` | `hash`, `drop` | What happens to prompt-bearing text in the context you pass. |
 | `THOTH_DATA_HANDLING_SALT` | any string | Salt for `hash`. Unset means a random salt per process. |
+| `THOTH_DATA_HANDLING_LOCAL_SCAN` | `on`, `off` | Scan withheld arguments locally and send `client_findings`. Default `on` whenever tool arguments are withheld. |
 
 An invalid value raises when the client is created. The SDK never falls back to sending the raw
 value.
@@ -796,9 +797,33 @@ process, which is enough to see that a value repeated in a session but not acros
 workers. Set the same `THOTH_DATA_HANDLING_SALT` on every process that should match values. Anyone who
 has the salt can confirm a guess at a low-entropy value (a short code, a name), so keep it secret.
 
+**Local scanning.** So checks that need values can still run, the SDK scans the raw arguments in
+your process before withholding them (and the destination host in `request_metadata`), and sends the
+result as `client_findings` next to `data_handling`:
+
+- It reports counts and categories (credentials, email addresses, phone numbers, SSN-shaped numbers,
+  confidentiality phrases), whether a `path` or `paths` value looks sensitive, a destination hostname,
+  and recipient domains. It never reports values, paths, the local part of an address, display names
+  or message text.
+- The detectors are heuristic regular expressions from a versioned spec (`thoth-detectors.v1`). A
+  finding is a signal, not proof that data is sensitive, and no finding is not proof that it is not.
+- The report names its ruleset hash. Thoth cannot verify a client scan: a workspace relies on it only
+  after the owner sets `accept_local_scan` and lists the hash in `accepted_scanner_ruleset_hashes`
+  (this release sends `3d4388b164bcf97a8823d2e6d3e03a6f5b10724d10faa539d59bcb38590eda44`; the
+  changelog lists the hash for each release). Findings only ever raise a decision.
+- A check that cannot finish (an error, arguments deeper than 16 levels or beyond 5,000 values for
+  `dlp` and `recipient`, non-ASCII text in recipient fields that engines read differently, a report
+  over 4 KB) is left out of `scanned`, so Thoth sees it as missing, not clean.
+- A workspace with `require_client_findings` holds every call from a client that withholds arguments
+  and sends no findings. If your workspace turns that on, keep local scanning on.
+- It is on whenever tool arguments are withheld. Set `THOTH_DATA_HANDLING_LOCAL_SCAN=off` (or
+  `data_handling_local_scan=False` on `ThothConfig`) to send no findings. With only
+  `data_handling_prompts` set, arguments are sent as before and nothing is scanned.
+
 **What still reaches Thoth.** Tool names, decisions, session and user ids, timing, and the tool-call
-sequence. Key names are sent in `hash` and `redact` mode, and not in `drop`. The SDK declares what it
-applied, and Thoth records that declaration with the decision.
+sequence. Key names are sent in `hash` and `redact` mode, and not in `drop`. With local scanning on,
+also the findings above: counts, categories, a destination hostname and recipient domains. The SDK
+declares what it applied, and Thoth records that declaration with the decision.
 
 **What you give up.** Rules that read argument values (`arg.path contains ...`, regex, free-text
 keywords) and outbound data checks cannot run on values Thoth does not have. When such a rule exists, the
@@ -884,6 +909,7 @@ returned an argument rewrite although arguments were withheld, which points to a
 | `THOTH_DATA_HANDLING_TOOL_ARGUMENTS` | Optional `hash`, `redact` or `drop`: withhold tool-argument values from Thoth (see above). |
 | `THOTH_DATA_HANDLING_PROMPTS` | Optional `hash` or `drop` for prompt-bearing context text. |
 | `THOTH_DATA_HANDLING_SALT` | Optional salt for `hash`; random per process when unset. |
+| `THOTH_DATA_HANDLING_LOCAL_SCAN` | Optional `on` or `off`: scan withheld arguments locally and send findings (default `on` when arguments are withheld). |
 | `THOTH_LOG_LEVEL` | Optional SDK logger level override (`DEBUG`, `INFO`, `WARNING`, `ERROR`). If unset, SDK falls back to `LOG_LEVEL` when present. |
 
 Resolution precedence:

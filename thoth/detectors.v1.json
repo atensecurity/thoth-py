@@ -1,0 +1,137 @@
+{
+  "spec": "thoth-detectors",
+  "spec_version": 1,
+  "ruleset_id": "thoth-detectors.v1",
+  "ruleset_hash": "3d4388b164bcf97a8823d2e6d3e03a6f5b10724d10faa539d59bcb38590eda44",
+  "hash_rule": "ruleset_hash = sha256 hex of json.dumps(spec['detectors'], sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8'). Only the 'detectors' object is hashed; this header and 'notes' are not.",
+  "notes": {
+    "status": "Heuristic. Patterns are regular expressions only. A finding is a signal, not proof of sensitive data, and a missing finding is not proof of its absence. Nothing here is a compliance, HIPAA or certification claim.",
+    "trust": "The server cannot verify a client scan. It relies on one only when the workspace set accept_local_scan and listed this ruleset_hash in accepted_scanner_ruleset_hashes; findings only ever raise a decision.",
+    "allowlisting": "A workspace owner adds ruleset_hash to data_handling.accepted_scanner_ruleset_hashes (at most 20 lower-case sha256 hex strings) and sets accept_local_scan to true. A scanner sends scanner.ruleset_id and scanner.ruleset_hash with every client_findings report.",
+    "sensitive_path_extended": "Used today only by the Rust proxy (preflight.rs PHI_FILENAME_PATTERN). It is not a value of client_findings.scanned and the server does not read it. It is a separately named check so the proxy's wider list is never mistaken for 'sensitive_path'.",
+    "server_scan_depth": "The server's own scan of arguments it received descends to depth 32; scanners stop at 16. A leaf at depth 17 to 32 is counted by the server and not by a scanner, which is why a truncated scan omits the check (see bounds.truncation).",
+    "known_divergence": "Python re and Rust regex treat \\b, \\w, \\d and \\s as Unicode by default; JavaScript RegExp and Go RE2 treat them as ASCII. The normative semantics are ASCII. The server is Python, so on non-ASCII text next to a match the server can count differently. golden cases in group 'known_divergence' record the server's answer and are not part of cross-language conformance. The same holds for recipient field values: Unicode whitespace splits words and case-insensitive matching folds some non-ASCII letters (U+212A Kelvin sign, U+017F long s) in Python only, so an ASCII engine can report an unresolved recipient where the server reports a domain, or count words differently; it never reports fewer than none where the server reports some (recipient.ambiguous_input covers the places where it could)."
+  },
+  "regex_dialect": {
+    "engines": ["python-re", "javascript-regexp", "go-re2", "rust-regex"],
+    "allowed": "literals, character classes and ranges, \\b \\d \\s \\w and their negations, groups (capturing and non-capturing (?:...)), alternation, quantifiers ? * + {n} {n,} {n,m}, anchors ^ and $ (used only on a stripped, newline-free value).",
+    "forbidden": "lookahead, lookbehind, backreferences, named groups, possessive or lazy quantifiers, inline flags of any kind (flags are listed separately), Unicode property escapes, \\A \\z \\Z.",
+    "flags": {
+      "i": "case-insensitive; the only flag used. Apply it with the engine's own option, not inline.",
+      "global": "Every counting step matches globally and non-overlapping, scanning left to right, leftmost match first (alternatives tried in the order written). Do not set the JavaScript u or s or m flags, nor Python re.ASCII."
+    },
+    "word_boundary": "Normative: \\b, \\w, \\d and \\s are ASCII ([A-Za-z0-9_], [0-9], [ \\t\\n\\v\\f\\r]). Python and Rust default to Unicode; see notes.known_divergence."
+  },
+  "detectors": {
+    "bounds": {
+      "max_depth": 16,
+      "max_values": 5000,
+      "traversal": "Pre-order. The root is depth 0 and each child is one deeper. Dict values are visited in the order given, list items in order. A node deeper than max_depth is not visited and costs nothing. Every visited node, container or scalar, costs one of max_values; once spent, no further node is visited.",
+      "truncation": "If any node was left unvisited, the traversal is truncated. A scanner then leaves 'dlp' and 'recipient' out of 'scanned' and reports no findings for them, so the server sees them as missing (findings_missing) instead of clean.",
+      "max_findings": 64,
+      "max_count": 1000,
+      "max_payload_bytes": 4096
+    },
+    "dlp": {
+      "categories": ["credential", "email", "phone", "ssn", "confidential_marker"],
+      "scope": "Every string leaf of the arguments object, reached by the bounded traversal. Dict keys, numbers, booleans and null are not scanned. Each leaf is scanned on its own; a match never spans leaves. The empty string yields nothing.",
+      "counting": "Steps run in order on one leaf. Each step counts its matches in the text the earlier steps left, then replaces every match with 'replacement', so one stretch of text counts once per step that still matches it after earlier replacements. One count per match, never per character. Counts are summed per category across leaves.",
+      "steps": [
+        {"id": "aws_access_key", "category": "credential", "pattern": "\\bAKIA[0-9A-Z]{16}\\b", "flags": [], "replacement": "[REDACTED:credential]"},
+        {"id": "provider_token", "category": "credential", "pattern": "\\b(?:sk|rk|pk)_[A-Za-z0-9_-]{12,}\\b", "flags": [], "replacement": "[REDACTED:credential]"},
+        {"id": "slack_token", "category": "credential", "pattern": "\\bxox[baprs]-[A-Za-z0-9-]{10,}\\b", "flags": [], "replacement": "[REDACTED:credential]"},
+        {"id": "secret_assignment", "category": "credential", "pattern": "\\b(api[_-]?key|access[_-]?token|bearer|password|secret)\\b\\s*[:=]\\s*([^\\s,;]+)", "flags": ["i"], "replacement": "{group1}=[REDACTED:credential]"},
+        {"id": "email", "category": "email", "pattern": "\\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}\\b", "flags": [], "replacement": "[REDACTED:email]"},
+        {"id": "phone", "category": "phone", "pattern": "\\b(?:\\+?1[-.\\s]?)?(?:\\(\\d{3}\\)|\\d{3})[-.\\s]?\\d{3}[-.\\s]?\\d{4}\\b", "flags": [], "replacement": "[REDACTED:phone]"},
+        {"id": "ssn", "category": "ssn", "pattern": "\\b\\d{3}-\\d{2}-\\d{4}\\b", "flags": [], "replacement": "[REDACTED:ssn]"},
+        {"id": "confidential_marker", "category": "confidential_marker", "pattern": "\\b(confidential|internal only|do not share|not for external use)\\b", "flags": ["i"], "replacement": "[REDACTED:confidential-marker]"}
+      ],
+      "finding": {"kind": "dlp", "one_per": "category with at least one match", "order": "categories order above", "count": "min(total matches, bounds.max_count)"}
+    },
+    "sensitive_path": {
+      "keys": ["path", "paths"],
+      "scope": "Top-level keys of the arguments object only; nested objects are not read.",
+      "candidates": "'path' when it is a non-empty string; every non-empty string element of 'paths' when it is a list. Anything else is ignored (the server stringifies other element types in a Python-specific way, which is outside conformance).",
+      "normalization": "none. The pattern is searched anywhere in the whole string: no percent-decoding, no Unicode normalization, no basename extraction, no case folding beyond flag i.",
+      "pattern": "(phi|patient|sensitive|ssn|pii|hipaa|mrn|dob|medical|health|rx|confidential)",
+      "flags": ["i"],
+      "count": "Number of candidates the pattern matches (a candidate counts once however many times it matches).",
+      "finding": {"kind": "sensitive_path", "emit_when": "count >= 1", "count": "min(count, bounds.max_count)"}
+    },
+    "sensitive_path_extended": {
+      "status": "proxy_only",
+      "consumed_by_server": false,
+      "scanned_name": null,
+      "keys": ["path", "paths", "uri"],
+      "normalization": ["percent-decode as UTF-8 (lossy)", "Unicode NFC", "take the final path component (the whole string when there is none)", "lower-case"],
+      "pattern": "(phi|patient|mrn|dob|ssn|pii|hipaa|sensitive|medical|diagnosis|rx_|medication|clinical|health|confidential|api_key|secret|credential|token|password|\\.pem|\\.key|id_rsa|\\.env|proxy_api_key)",
+      "flags": ["i"]
+    },
+    "egress_host": {
+      "sources": [
+        {"from": "metadata", "key": "secrets_broker.target_host", "when": "metadata.secrets_broker is an object"},
+        {"from": "metadata", "first_non_empty_of": ["broker_destination_host", "target_host", "host", "uri", "url"]},
+        {"from": "arguments", "first_non_empty_of": ["host", "endpoint", "uri", "url"]}
+      ],
+      "source_rules": "Try the sources in order and stop at the first one that yields a non-empty host. Inside a first_non_empty_of group take the first value that is a non-empty string after trimming, and parse only that one; if it yields no host, the group yields nothing and later keys of that group are not tried. Non-string values are ignored (the server stringifies them; outside conformance). A scanner with no request metadata uses only the arguments source.",
+      "extraction": [
+        "Trim leading and trailing spaces (U+0020 only) from the value. If what remains contains a backslash, an ASCII control character (U+0000 to U+001F, U+007F) or any whitespace character (including Unicode whitespace), the value is unparseable (see unparseable): stop.",
+        "If it does not contain '://', prefix 'https://'.",
+        "authority = text after the first '://' up to the first of '/', '?' or '#'.",
+        "Drop everything up to and including the last '@' (user info).",
+        "If the remainder starts with '[', host = text between '[' and the next ']'; otherwise host = text before the first ':'.",
+        "Lower-case it. An empty result means no host."
+      ],
+      "unparseable": "A value containing a backslash, an ASCII control character or any whitespace after trimming spaces is unparseable: parsers disagree on it (WHATWG clients read a backslash as a slash, and urlparse drops tab, CR and LF), so it is reported as unresolved. An authority with an unbalanced '[' or ']' is unparseable: the server's parser raises, so that input has no server answer and a scanner reports it as unresolved. So is a value that yields no host but looks like a URL: it contains '://', starts with '//', or contains '@' (for example 'https:///x', 'http://@', '//x.example'). Clients disagree on where such a value points, so it is reported as unresolved. A value that yields no host and has none of those marks (':8080', 'items') has no host.",
+      "host_grammar": {"label": "[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$", "flags": [], "max_length": 253, "notes": "A trailing dot, an underscore, a colon (IPv6) or a non-ASCII letter fails the grammar. A dotted IPv4 address passes."},
+      "finding": {
+        "kind": "egress_host",
+        "no_host": "no finding (the check is still listed in scanned)",
+        "valid_host": {"verdict": "not_allowlisted", "host": "the lower-case host"},
+        "invalid_host": {"verdict": "unresolved", "host": "omitted"},
+        "note": "The scanner knows no allowlist. 'not_allowlisted' with a host means 'matched by the server against the workspace allowlist'; the server drops it when the host is allowed. A scanner never sends a host it could not validate."
+      }
+    },
+    "recipient": {
+      "fields": ["attendees", "bcc", "bccaddresses", "bccrecipients", "cc", "ccaddresses", "ccrecipients", "collaborators", "destinationemail", "emailaddresses", "emails", "forwardto", "grantee", "granteeemail", "invitees", "members", "participantemail", "participants", "recipient", "recipientemail", "recipientemails", "recipients", "sendto", "sharedwith", "sharewith", "to", "toaddresses", "toemails", "torecipients"],
+      "extra_fields_for_sending_tools": ["email", "emailaddress"],
+      "key_normalization": "Remove every '_', '-' and whitespace character from the key, then lower-case it.",
+      "sending_tool_pattern": {"pattern": "(send|share|forward|invite|export|mail|reply|grant|permission|member|collaborator|access)", "flags": ["i"]},
+      "data_move": {
+        "tool_name_hint": {"pattern": "(forward|share|export|upload|fax|grant|permission|member|collaborator|access)", "flags": ["i"]},
+        "fields": ["collaborators", "destinationemail", "forwardto", "grantee", "granteeemail", "members", "sharedwith", "sharewith"],
+        "rule": "data_move is true when the tool name matches tool_name_hint, or a recipient field in 'fields' is present anywhere in the arguments."
+      },
+      "walk": "Visit the arguments by the bounded traversal. For each dict entry whose normalized key is a recipient field, read recipients from its value (rules below) and do not walk inside it. For other entries: when the tool name matches sending_tool_pattern and the normalized key matches positional_keys, also read bare addresses from the value (text rule below); then keep walking.",
+      "positional_keys": {"pattern": "^(args|input|arg\\d+)$", "flags": []},
+      "value_rules": [
+        "null yields nothing.",
+        "A string: split on ',' or ';'. For each non-empty trimmed entry: if it holds text in angle brackets, the bracket contents are the recipients plus any other word containing '@'; else if any word contains '@', those words; else every word is a recipient.",
+        "A list: the recipients of each element.",
+        "A dict: values under address keys (email, address, emailaddress, value, mail, compared after key_normalization) are read; values under other keys are read unless the key is a display key (name, displayname, firstname, lastname, fullname, type, role, label) and the value is a string without '@'. Keep only recipients containing '@' that are not the unreadable marker; if the dict has no address under an address key, or any recipient it holds lacks '@', it also contributes one unreadable recipient.",
+        "Any other type (number, boolean) is one unreadable recipient."
+      ],
+      "text_rule": "For a string (or each string in a list) containing '@': scan left to right; at each '@' that follows a non-whitespace character, match the domain pattern directly after it, then resume after the match. Each match is a recipient 'recipient@<domain>'; a domain over 253 characters or with a label over 63 is one unreadable recipient. Other words are not recipients.",
+      "text_domain_pattern": {"pattern": "[\\w-]+(?:\\.[\\w-]+)+", "flags": []},
+      "address": {"pattern": "^[^@\\s<>,;]+@([a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)$", "flags": ["i"], "applies_to": "a recipient after trimming", "domain": "group 1, lower-cased"},
+      "resolution": "A recipient that matches 'address' and whose domain passes egress_host.host_grammar (dotted) is resolved to that domain. Every other recipient, including the unreadable marker and placeholders like '{{recipient}}', is unresolved. The scanner knows no workspace domains and no allowed destinations, so it never reports 'internal'.",
+      "ambiguous_input": "Python reads Unicode where other engines read ASCII (\\s, \\w, case folding, str.split and strip), and the guard normalizes keys with \\s. For some non-ASCII text a scanner in another language would see no recipient where the server sees one (for example 'a@b\u00fccher.de' in positional text, or a key 'to' followed by U+00A0). So a scanner leaves 'recipient' out of scanned, and reports no recipient findings, when any of these contains a character that is not printable ASCII (U+0020 to U+007E) and not one of the ASCII whitespace characters tab, line feed, vertical tab, form feed and carriage return: (a) the tool name; (b) any dict key the recipient rules read, which is every key of every dict the walk visits and every key inside a dict held by a recipient field; (c) a string that contains '@' and that the text_rule reads. The server then sees recipient as missing instead of clean. Non-ASCII text elsewhere (display names, other values) does not omit the check: the field rules cannot make a scanner report less than the server, only count differently (see notes.known_divergence).",
+      "privacy": "Only domains are sent. The local part, display names and message text never leave the process.",
+      "max_domains": 10,
+      "max_unresolved_findings": 10,
+      "finding": {
+        "kind": "recipient",
+        "resolved": {"status": "outside", "data_move": "as above", "domains": "distinct resolved domains in order of first appearance, at most max_domains"},
+        "unresolved": {"status": "unresolved", "data_move": "as above", "emit": "one finding per unresolved recipient, at most max_unresolved_findings; plus one when distinct domains exceed max_domains (the rest are unreported)"},
+        "order": "the resolved finding first, then the unresolved ones",
+        "none": "no recipients, no finding"
+      }
+    },
+    "report": {
+      "version": 1,
+      "scanned_order": ["dlp", "sensitive_path", "egress_host", "recipient"],
+      "findings_order": "dlp (category order), sensitive_path, egress_host, recipient",
+      "scanned": "Every check the scanner ran to completion, in scanned_order. Only checks in 'scanned' may have findings."
+    }
+  }
+}

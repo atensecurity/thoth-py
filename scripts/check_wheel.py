@@ -26,6 +26,8 @@ def check_wheel(path: Path, version: str | None = None) -> None:
         names = [name for name in archive.namelist() if name.endswith(".dist-info/METADATA")]
         if len(names) != 1 or "thoth/__init__.py" not in archive.namelist():
             raise ValueError("Expected one SDK metadata file and thoth package")
+        if "thoth/detectors.v1.json" not in archive.namelist():
+            raise ValueError("Wheel is missing thoth/detectors.v1.json, the local-scan detector spec")
         metadata = BytesParser().parsebytes(archive.read(names[0]))
     if canonicalize_name(metadata.get("Name", "")) != "atensec-thoth":
         raise ValueError("Wheel must contain atensec-thoth")

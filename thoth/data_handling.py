@@ -75,6 +75,7 @@ LONG_TEXT_CHARS = 512
 ENV_TOOL_ARGUMENTS = "THOTH_DATA_HANDLING_TOOL_ARGUMENTS"
 ENV_PROMPTS = "THOTH_DATA_HANDLING_PROMPTS"
 ENV_SALT = "THOTH_DATA_HANDLING_SALT"
+ENV_LOCAL_SCAN = "THOTH_DATA_HANDLING_LOCAL_SCAN"
 
 # Context dicts (task_context, auth_context, delegation_context, identity_binding,
 # request metadata) are mostly identifiers the policy engine reads. Values under
@@ -172,6 +173,23 @@ def resolve_salt(value: Any) -> str | None:
     if not isinstance(value, str):
         raise ValueError("data_handling_salt must be a string")
     return value if value.strip() else None
+
+
+def resolve_local_scan(value: Any) -> bool:
+    """Whether to scan withheld arguments locally: option, else env, default True. Raises on an unclear value."""
+    if value is None or (isinstance(value, str) and not value.strip()):
+        value = os.getenv(ENV_LOCAL_SCAN)
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return True
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        word = value.strip().lower()
+        if word in ("on", "true", "1", "yes"):
+            return True
+        if word in ("off", "false", "0", "no"):
+            return False
+    raise ValueError("data_handling_local_scan must be on or off")
 
 
 def canonical_json(value: Any) -> str:

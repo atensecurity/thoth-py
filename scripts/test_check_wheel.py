@@ -33,15 +33,22 @@ Requires-Dist: langgraph>=0.2; extra == "langgraph"
 Requires-Dist: openai>=1.50; extra == "openai"
 """
 
-    def write(self, metadata, package=True):
+    def write(self, metadata, package=True, spec=True):
         with ZipFile(self.wheel, "w") as z:
             z.writestr("atensec_thoth-0.5.21.dist-info/METADATA", metadata)
             if package:
                 z.writestr("thoth/__init__.py", "")
+            if spec:
+                z.writestr("thoth/detectors.v1.json", "{}")
 
     def test_complete_optional_provider_contract(self):
         self.write(self.metadata)
         check_wheel(self.wheel, "0.5.21")
+
+    def test_wheel_without_the_detector_spec_rejected(self):
+        self.write(self.metadata, spec=False)
+        with self.assertRaisesRegex(ValueError, "detectors.v1.json"):
+            check_wheel(self.wheel)
 
     def test_advertised_extras_without_dependencies_rejected(self):
         self.write("\n".join(line for line in self.metadata.splitlines() if not line.startswith("Requires-Dist:")))

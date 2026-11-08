@@ -35,6 +35,15 @@ identifiers and labels above. `hash` values are HMAC-SHA256 keyed with a salt th
 client (`THOTH_DATA_HANDLING_SALT`, else random per process); Thoth does not hold it, and equal values
 match only under the same salt. A low-entropy value can be confirmed by anyone who has the salt.
 
+Local scan findings. So rules that need values can still be answered, a client that withholds tool
+arguments also scans the raw arguments in its own process (heuristic patterns, `thoth-detectors.v1`)
+and sends `client_findings`: counts and categories of credentials, emails, phone numbers, SSN-shaped
+numbers and confidentiality phrases, whether a path looks sensitive, one destination hostname, and
+recipient domains. It never sends values, paths, the local part of an address, display names or
+message text. A hostname or a recipient domain can itself be sensitive to you; set
+`THOTH_DATA_HANDLING_LOCAL_SCAN=off` to send no findings. Thoth cannot verify the scan: it relies on
+it only if your workspace opted in and listed the scanner's ruleset hash.
+
 Effect on decisions: rules and outbound data checks that need argument values cannot run on values Thoth
 does not have. A call that such a rule would examine is held for review (`STEP_UP`, reason code
 `args_withheld`) rather than decided blind, and with `drop` some checks fall back on tool-name heuristics.

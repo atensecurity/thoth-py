@@ -10,7 +10,7 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from thoth.data_handling import DataHandling, process_salt, resolve_prompts_mode, resolve_salt, resolve_tool_arguments_mode
+from thoth.data_handling import DataHandling, process_salt, resolve_local_scan, resolve_prompts_mode, resolve_salt, resolve_tool_arguments_mode
 
 
 class EnforcementMode(StrEnum):
@@ -173,6 +173,11 @@ class ThothConfig(BaseModel):
     # an invalid value raises here, so a typo never sends values unprotected.
     data_handling_tool_arguments: str | None = Field(default=None, validate_default=True)
     data_handling_prompts: str | None = Field(default=None, validate_default=True)
+    # With tool arguments withheld, scan the raw arguments locally and send what
+    # was found (counts, categories, hostnames, recipient domains) as
+    # client_findings (see thoth.local_scan). On by default whenever arguments
+    # are withheld; THOTH_DATA_HANDLING_LOCAL_SCAN=off or False turns it off.
+    data_handling_local_scan: bool | None = Field(default=None, validate_default=True)
     # Client-held hashing salt; never sent to Thoth, never printed or dumped.
     data_handling_salt: str | None = Field(default=None, validate_default=True, repr=False, exclude=True)
 
@@ -185,6 +190,11 @@ class ThothConfig(BaseModel):
     @classmethod
     def validate_data_handling_prompts(cls, value: Any) -> Any:
         return resolve_prompts_mode(value)
+
+    @field_validator("data_handling_local_scan", mode="before")
+    @classmethod
+    def validate_data_handling_local_scan(cls, value: Any) -> Any:
+        return resolve_local_scan(value)
 
     @field_validator("data_handling_salt", mode="before")
     @classmethod

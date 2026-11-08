@@ -17,6 +17,23 @@ All notable changes to `atensec-thoth` are documented in this file.
   call fails closed (the tool does not run, `ThothPolicyViolation`) because that
   is a server or contract problem. Nothing changes when unset; an invalid
   value raises when the client is created.
+- Local scanning when tool arguments are withheld. With
+  `data_handling_tool_arguments` set to `hash`, `redact` or `drop`, the SDK scans the
+  raw arguments (and the destination host in `request_metadata`) in your process
+  before withholding them, and sends `client_findings` next to `data_handling`:
+  counts and categories of credentials, email addresses, phone numbers, SSN-shaped
+  numbers and confidentiality phrases, whether a path looks sensitive, a destination
+  hostname, and recipient domains. The report never contains values, paths, local
+  parts or display names. The detectors are heuristic. The scanner identifies itself
+  as `atensec-thoth` with ruleset `thoth-detectors.v1`, ruleset hash
+  `3d4388b164bcf97a8823d2e6d3e03a6f5b10724d10faa539d59bcb38590eda44`; a workspace
+  relies on the report only after it sets `accept_local_scan` and lists that hash in
+  `accepted_scanner_ruleset_hashes`. A check that fails, hits the depth or value
+  bound, or would not fit the 4 KB limit is left out of `scanned` instead of
+  reported clean. `THOTH_DATA_HANDLING_LOCAL_SCAN=off` (or
+  `data_handling_local_scan=False` on `ThothConfig`) sends no findings. A workspace
+  with `require_client_findings` holds calls from a client that withholds arguments
+  and sends no findings. Nothing changes when data handling is not configured.
 
 ## 0.7.0 - 2026-11-06
 
