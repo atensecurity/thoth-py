@@ -683,7 +683,15 @@ class _LangGraphRuntime:
                 decision,
                 fallback_decision=step_up_initial,
             )
-        modification = _modification_to_apply(decision, step_up_initial, arguments_withheld=self._config.arguments_withheld)
+        try:
+            modification = _modification_to_apply(decision, step_up_initial, arguments_withheld=self._config.arguments_withheld)
+        except ModifiedArgumentsNotApplicableError as exc:
+            raise _violation_from_decision(
+                tool_name,
+                f"{exc}; the call was not run",
+                decision,
+                fallback_decision=step_up_initial,
+            ) from exc
         if modification is not None:
             try:
                 modified_args, modified_kwargs = _apply_modified_call_args(call_args, call_kwargs, modification)
@@ -751,7 +759,15 @@ class _LangGraphRuntime:
                 decision,
                 fallback_decision=step_up_initial,
             )
-        modification = _modification_to_apply(decision, step_up_initial, arguments_withheld=self._config.arguments_withheld)
+        try:
+            modification = _modification_to_apply(decision, step_up_initial, arguments_withheld=self._config.arguments_withheld)
+        except ModifiedArgumentsNotApplicableError as exc:
+            raise _violation_from_decision(
+                tool_name,
+                f"{exc}; the call was not run",
+                decision,
+                fallback_decision=step_up_initial,
+            ) from exc
         if modification is not None:
             try:
                 modified_args, modified_kwargs = _apply_modified_call_args(call_args, call_kwargs, modification)

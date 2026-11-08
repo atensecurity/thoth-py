@@ -209,15 +209,17 @@ def _modification_to_apply(
     held the call are on the initial decision. A MODIFY with no arguments yields
     an empty dict, which ``_apply_modified_call_args`` refuses.
 
-    When argument values were withheld from Thoth, nothing is applied: the server
-    only saw hashes or placeholders, so a modification of them (which a conforming
-    server never sends) would feed those into the tool. The call runs with the
-    arguments the caller passed.
+    When argument values were withheld from Thoth, a modification is refused: the
+    server only saw hashes or placeholders, so a rewrite (which a conforming server
+    never sends) would feed those into the tool, and running the caller's original
+    arguments instead would hide a server or contract problem. The call fails closed
+    with ``ModifiedArgumentsNotApplicableError``; the callers turn it into a
+    ``ThothPolicyViolation`` and the tool does not run.
     """
-    if arguments_withheld:
-        if decision.is_modify or (step_up_initial is not None and step_up_initial.modified_tool_args):
-            logger.warning("thoth: ignoring modified arguments from the enforcer because argument values are withheld (data handling)")
-        return None
+    if arguments_withheld and (decision.is_modify or (step_up_initial is not None and step_up_initial.modified_tool_args)):
+        raise ModifiedArgumentsNotApplicableError(
+            "the server returned an argument rewrite although argument values were withheld (data handling); this indicates a server or contract problem"
+        )
     if decision.is_modify:
         return decision.modified_tool_args or {}
     if decision.is_allow and step_up_initial is not None and step_up_initial.modified_tool_args:
@@ -665,7 +667,16 @@ class Tracer:
                 fallback_decision=step_up_initial,
                 explanation=explanation,
             )
-        modification = _modification_to_apply(decision, step_up_initial, arguments_withheld=self._config.arguments_withheld)
+        try:
+            modification = _modification_to_apply(decision, step_up_initial, arguments_withheld=self._config.arguments_withheld)
+        except ModifiedArgumentsNotApplicableError as exc:
+            raise _violation_from_decision(
+                tool_name,
+                f"{exc}; the call was not run",
+                decision,
+                fallback_decision=step_up_initial,
+                explanation=explanation,
+            ) from exc
         if modification is not None:
             try:
                 effective_args, effective_kwargs = _apply_modified_call_args(call_args, kwargs, modification)
@@ -792,7 +803,16 @@ class Tracer:
                 fallback_decision=step_up_initial,
                 explanation=explanation,
             )
-        modification = _modification_to_apply(decision, step_up_initial, arguments_withheld=self._config.arguments_withheld)
+        try:
+            modification = _modification_to_apply(decision, step_up_initial, arguments_withheld=self._config.arguments_withheld)
+        except ModifiedArgumentsNotApplicableError as exc:
+            raise _violation_from_decision(
+                tool_name,
+                f"{exc}; the call was not run",
+                decision,
+                fallback_decision=step_up_initial,
+                explanation=explanation,
+            ) from exc
         if modification is not None:
             try:
                 effective_args, effective_kwargs = _apply_modified_call_args(call_args, kwargs, modification)

@@ -12,8 +12,8 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 import pytest
-from thoth import ThothPolicyViolation
-from thoth import data_handling as dh
+
+from thoth import ThothPolicyViolation, data_handling as dh
 from thoth.enforcer_client import EnforcerClient
 from thoth.models import DecisionType, EnforcementDecision, EnforcementMode, ThothConfig
 from thoth.session import SessionContext
@@ -427,25 +427,35 @@ def test_modify_is_applied_when_nothing_is_withheld():
 
 
 @pytest.mark.parametrize("mode", ["hash", "redact", "drop"])
-def test_modify_is_ignored_when_arguments_are_withheld(mode):
+def test_modify_fails_closed_when_arguments_are_withheld(mode):
     tool_calls: list[Any] = []
     tracer, _ = make_tracer(Wire(MODIFY), data_handling_tool_arguments=mode)
     wrapped = tracer.wrap_tool("read_file", lambda **kw: tool_calls.append(kw) or "ok")
-    assert wrapped(input="mine") == "ok"
-    assert tool_calls == [{"input": "mine"}]
+    with pytest.raises(ThothPolicyViolation) as excinfo:
+        wrapped(input="mine")
+    assert tool_calls == []
+    message = str(excinfo.value)
+    for phrase in ("argument rewrite", "withheld", "the call was not run", "server or contract problem"):
+        assert phrase in message
+    for leaked in ("FROM-SERVER", "mine"):
+        assert leaked not in message
 
 
+@pytest.mark.parametrize("mode", ["hash", "redact", "drop"])
 @pytest.mark.asyncio
-async def test_modify_is_ignored_when_arguments_are_withheld_async():
+async def test_modify_fails_closed_when_arguments_are_withheld_async(mode):
     tool_calls: list[Any] = []
-    tracer, _ = make_tracer(Wire(MODIFY), data_handling_tool_arguments="hash")
+    tracer, _ = make_tracer(Wire(MODIFY), data_handling_tool_arguments=mode)
 
     async def tool(**kw: Any) -> str:
         tool_calls.append(kw)
         return "ok"
 
-    assert await tracer.wrap_tool("read_file", tool)(input="mine") == "ok"
-    assert tool_calls == [{"input": "mine"}]
+    with pytest.raises(ThothPolicyViolation) as excinfo:
+        await tracer.wrap_tool("read_file", tool)(input="mine")
+    assert tool_calls == []
+    assert "the call was not run" in str(excinfo.value)
+    assert "FROM-SERVER" not in str(excinfo.value)
 
 
 def test_args_withheld_step_up_is_explained_to_the_user():

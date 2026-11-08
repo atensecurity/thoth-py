@@ -13,7 +13,9 @@ All notable changes to `atensec-thoth` are documented in this file.
   `THOTH_DATA_HANDLING_SALT`. Hashes use a client-held salt. The request declares
   what was applied, a rule that needs argument values holds the call
   (`args_withheld`) and says why, and modified arguments are never applied to a
-  call whose arguments were withheld. Nothing changes when unset; an invalid
+  call whose arguments were withheld: if the server returns a rewrite anyway, the
+  call fails closed (the tool does not run, `ThothPolicyViolation`) because that
+  is a server or contract problem. Nothing changes when unset; an invalid
   value raises when the client is created.
 
 ## 0.7.0 - 2026-11-06

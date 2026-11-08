@@ -1,7 +1,7 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from time import perf_counter, sleep
-from typing import TypedDict
+from typing import Any, TypedDict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -13,6 +13,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode
+
 from thoth.exceptions import ThothDeferredError, ThothPolicyViolation
 from thoth.integrations.langgraph import (
     instrument_langgraph,
@@ -232,6 +233,44 @@ def test_modify_decision(mocked_runtime_clients):
     assert post.metadata["modification_reason"] == "remove sensitive term"
     assert post.metadata["original_tool_args"] == {"query": "secret"}
     assert post.metadata["modified_tool_args"] == {"query": "sanitized"}
+
+
+@pytest.mark.parametrize("mode", ["hash", "redact", "drop"])
+@pytest.mark.parametrize("use_async", [False, True])
+def test_modify_fails_closed_when_arguments_are_withheld(mocked_runtime_clients, mode, use_async):
+    seen: list[str] = []
+
+    @tool
+    def redact(query: str) -> str:
+        """Redact data."""
+
+        seen.append(query)
+        return query
+
+    decision = EnforcementDecision(decision=DecisionType.MODIFY, modified_tool_args={"query": "FROM-SERVER"})
+    mocked_runtime_clients["enforcer"].check.return_value = decision
+    mocked_runtime_clients["enforcer"].acheck.return_value = decision
+
+    governed = instrument_langgraph(
+        [redact],
+        agent_id="lg-agent",
+        approved_scope=["redact"],
+        tenant_id="trantor",
+        api_url="https://enforcer.example",
+        data_handling_tool_arguments=mode,
+    )
+
+    def run() -> Any:
+        if use_async:
+            return asyncio.run(governed[0].ainvoke({"query": "secret"}))
+        return governed[0].invoke({"query": "secret"})
+
+    with pytest.raises(ThothPolicyViolation) as excinfo:
+        run()
+    assert seen == []
+    assert "the call was not run" in str(excinfo.value)
+    for leaked in ("FROM-SERVER", "secret"):
+        assert leaked not in str(excinfo.value)
 
 
 def test_defer_decision(mocked_runtime_clients):

@@ -805,7 +805,8 @@ keywords) and outbound data checks cannot run on values Thoth does not have. Whe
 call is held (`STEP_UP` with reason code `args_withheld`) instead of being decided on values it
 cannot see, and the `ThothPolicyViolation` message says so. With `drop`, some checks fall back on tool-name
 heuristics. A server never returns modified arguments for a call whose arguments were withheld; if one
-ever does, the SDK ignores it and logs a warning, and the tool runs with the arguments you passed.
+ever does, the SDK fails closed: the tool does not run and a `ThothPolicyViolation` says the server
+returned an argument rewrite although arguments were withheld, which points to a server or contract problem.
 
 ---
 
