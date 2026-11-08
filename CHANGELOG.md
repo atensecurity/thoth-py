@@ -26,7 +26,7 @@ All notable changes to `atensec-thoth` are documented in this file.
   hostname, and recipient domains. The report never contains values, paths, local
   parts or display names. The detectors are heuristic. The scanner identifies itself
   as `atensec-thoth` with ruleset `thoth-detectors.v1`, ruleset hash
-  `3d4388b164bcf97a8823d2e6d3e03a6f5b10724d10faa539d59bcb38590eda44`; a workspace
+  `db797fde60f300719b9dac8a360efd6ce8b1f7313587cc714aebf7a93428434b`; a workspace
   relies on the report only after it sets `accept_local_scan` and lists that hash in
   `accepted_scanner_ruleset_hashes`. A check that fails, hits the depth or value
   bound, or would not fit the 4 KB limit is left out of `scanned` instead of
@@ -34,6 +34,10 @@ All notable changes to `atensec-thoth` are documented in this file.
   `data_handling_local_scan=False` on `ThothConfig`) sends no findings. A workspace
   with `require_client_findings` holds calls from a client that withholds arguments
   and sends no findings. Nothing changes when data handling is not configured.
+- The local scan leaves `recipient` out of `scanned`, instead of reporting it clean or milder, when a
+  recipient field holds one of the 23 spaces that Python splits words on and ASCII does not (U+001C
+  to U+001F, U+0085, U+00A0, U+1680, U+2000 to U+200A, U+2028, U+2029, U+202F, U+205F, U+3000).
+  Accented letters and other text in recipient fields still scan.
 
 ## 0.7.0 - 2026-11-06
 

@@ -20,7 +20,7 @@ FEATURES = Path(__file__).resolve().parents[2] / "features"
 
 # Changing any detector changes this value on purpose. It is the same pin the enforcer tests hold;
 # update the spec, the golden, both vendored copies and both pins in one pull request.
-PINNED_RULESET_HASH = "3d4388b164bcf97a8823d2e6d3e03a6f5b10724d10faa539d59bcb38590eda44"
+PINNED_RULESET_HASH = "db797fde60f300719b9dac8a360efd6ce8b1f7313587cc714aebf7a93428434b"
 ENV = "THOTH_DATA_HANDLING_LOCAL_SCAN"
 
 

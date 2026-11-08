@@ -81,6 +81,14 @@ def _sdk_version() -> str:
     return cleaned or "0"
 
 
+# Whitespace Python's str.split(), str.strip() and \s treat as a separator but ASCII does not
+# (detectors.recipient.ambiguous_input, clause d).
+_UNICODE_SPACE = frozenset(
+    "\u001c\u001d\u001e\u001f\u0085\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006"
+    "\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000"
+)
+
+
 def _plain(text: str) -> bool:
     """Printable ASCII and ASCII whitespace only (detectors.recipient.ambiguous_input)."""
     return all(0x20 <= ord(ch) <= 0x7E or ch in _ASCII_WHITESPACE for ch in text)
@@ -294,10 +302,13 @@ class LocalScanner:
             return True
 
         def keys_plain(value: Any) -> bool:
+            # Keys must be plain; string values must not hold a space Python splits on and ASCII does not.
             if isinstance(value, dict):
                 return all(_plain(str(key)) and keys_plain(item) for key, item in value.items())
             if isinstance(value, list):
                 return all(keys_plain(item) for item in value)
+            if isinstance(value, str):
+                return not any(ch in _UNICODE_SPACE for ch in value)
             return True
 
         def text_plain(value: Any) -> bool:

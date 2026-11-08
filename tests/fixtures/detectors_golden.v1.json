@@ -2,7 +2,7 @@
  "spec": "thoth-detectors-golden",
  "spec_version": 1,
  "ruleset_id": "thoth-detectors.v1",
- "ruleset_hash": "3d4388b164bcf97a8823d2e6d3e03a6f5b10724d10faa539d59bcb38590eda44",
+ "ruleset_hash": "db797fde60f300719b9dac8a360efd6ce8b1f7313587cc714aebf7a93428434b",
  "how_to_use": "For each case run your scanner on tool_name, arguments and (when present) metadata, and compare scanned and findings exactly (order included) with 'expected'. Cases with source 'server' were generated from the enforcer; 'spec' cases express a rule the server does not apply (scanner bounds). Group 'known_divergence' records what the Python server answers for text where Unicode and ASCII regex semantics differ; skip it for conformance.",
  "cases": [
   {
@@ -24088,6 +24088,125 @@
    }
   },
   {
+   "id": "ambiguous.nbsp_separated_words_in_field_value",
+   "group": "ambiguous",
+   "tool_name": "send_email",
+   "arguments": {
+    "to": "a@x.com b@y.org"
+   },
+   "source": "spec",
+   "note": "recipient.ambiguous_input: the server reads Unicode where other engines read ASCII, so the scanner leaves recipient out of scanned instead of reporting clean.",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "email",
+      "count": 2
+     }
+    ]
+   }
+  },
+  {
+   "id": "ambiguous.information_separator_in_field_value",
+   "group": "ambiguous",
+   "tool_name": "send_email",
+   "arguments": {
+    "to": "alice\u001fbob"
+   },
+   "source": "spec",
+   "note": "recipient.ambiguous_input: the server reads Unicode where other engines read ASCII, so the scanner leaves recipient out of scanned instead of reporting clean.",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "ambiguous.next_line_in_bracketed_address",
+   "group": "ambiguous",
+   "tool_name": "send_email",
+   "arguments": {
+    "to": "<ab@x.com>"
+   },
+   "source": "spec",
+   "note": "recipient.ambiguous_input: the server reads Unicode where other engines read ASCII, so the scanner leaves recipient out of scanned instead of reporting clean.",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "email",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "ambiguous.line_separator_in_list_element",
+   "group": "ambiguous",
+   "tool_name": "send_email",
+   "arguments": {
+    "cc": [
+     "a@x.com",
+     "<a b@y.org>"
+    ]
+   },
+   "source": "spec",
+   "note": "recipient.ambiguous_input: the server reads Unicode where other engines read ASCII, so the scanner leaves recipient out of scanned instead of reporting clean.",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "email",
+      "count": 2
+     }
+    ]
+   }
+  },
+  {
+   "id": "ambiguous.ideographic_space_in_recipient_object",
+   "group": "ambiguous",
+   "tool_name": "send_email",
+   "arguments": {
+    "to": {
+     "email": "a　b@x.com"
+    }
+   },
+   "source": "spec",
+   "note": "recipient.ambiguous_input: the server reads Unicode where other engines read ASCII, so the scanner leaves recipient out of scanned instead of reporting clean.",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "email",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
    "id": "ambiguous.long_s_in_tool_name",
    "group": "ambiguous",
    "tool_name": "ſend_email",
@@ -24162,12 +24281,111 @@
    }
   },
   {
-   "id": "ambiguous.non_ascii_value_in_other_field_is_not_ambiguous",
+   "id": "ambiguous.non_ascii_letters_in_field_value_are_not_ambiguous",
+   "group": "ambiguous",
+   "tool_name": "send_email",
+   "arguments": {
+    "to": [
+     "José <jose@x.com>",
+     "名前 <m@y.org>"
+    ]
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "email",
+      "count": 2
+     },
+     {
+      "kind": "recipient",
+      "status": "outside",
+      "data_move": false,
+      "domains": [
+       "x.com",
+       "y.org"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "ambiguous.zero_width_space_in_field_value_is_not_ambiguous",
+   "group": "ambiguous",
+   "tool_name": "send_email",
+   "arguments": {
+    "to": "a@x.com​b"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "email",
+      "count": 1
+     },
+     {
+      "kind": "recipient",
+      "status": "unresolved",
+      "data_move": false
+     }
+    ]
+   }
+  },
+  {
+   "id": "ambiguous.ascii_whitespace_in_field_value_is_not_ambiguous",
+   "group": "ambiguous",
+   "tool_name": "send_email",
+   "arguments": {
+    "to": "a@x.com\tb@y.org\u000b<c@z.io>\f"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "email",
+      "count": 3
+     },
+     {
+      "kind": "recipient",
+      "status": "outside",
+      "data_move": false,
+      "domains": [
+       "z.io",
+       "x.com",
+       "y.org"
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "id": "ambiguous.unicode_space_in_non_recipient_field_is_not_ambiguous",
    "group": "ambiguous",
    "tool_name": "send_email",
    "arguments": {
     "to": "a@x.com",
-    "subject": "café"
+    "subject": "a b"
    },
    "source": "server",
    "expected": {
@@ -24195,14 +24413,14 @@
    }
   },
   {
-   "id": "known_divergence.recipient_nbsp_separated_words",
-   "group": "known_divergence",
+   "id": "ambiguous.non_ascii_value_in_other_field_is_not_ambiguous",
+   "group": "ambiguous",
    "tool_name": "send_email",
    "arguments": {
-    "to": "a@x.com b@y.org"
+    "to": "a@x.com",
+    "subject": "café"
    },
    "source": "server",
-   "note": "Python str.split() splits on U+00A0: two domains. An ASCII scanner reads one word and reports one unresolved recipient.",
    "expected": {
     "scanned": [
      "dlp",
@@ -24214,15 +24432,14 @@
      {
       "kind": "dlp",
       "category": "email",
-      "count": 2
+      "count": 1
      },
      {
       "kind": "recipient",
       "status": "outside",
       "data_move": false,
       "domains": [
-       "x.com",
-       "y.org"
+       "x.com"
       ]
      }
     ]
