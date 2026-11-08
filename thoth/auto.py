@@ -368,12 +368,12 @@ def _install_langchain() -> Callable[[], None] | None:
         finally:
             _CURRENT_SESSION.reset(token)
 
-    BaseTool.run = run  # type: ignore[method-assign]
-    BaseTool.arun = arun  # type: ignore[method-assign]
+    BaseTool.run = run
+    BaseTool.arun = arun
 
     def undo() -> None:
-        BaseTool.run = original_run  # type: ignore[method-assign]
-        BaseTool.arun = original_arun  # type: ignore[method-assign]
+        BaseTool.run = original_run
+        BaseTool.arun = original_arun
 
     return undo
 
@@ -639,7 +639,7 @@ def _install_pydantic_ai() -> Callable[[], None] | None:
     """
     try:
         ToolManager = importlib.import_module("pydantic_ai.tool_manager").ToolManager
-        output_module = importlib.import_module("pydantic_ai._output")
+        output_module: Any = importlib.import_module("pydantic_ai._output")
     except ImportError:
         return None
     original_raw = ToolManager.__dict__.get("_raw_execute")
@@ -826,7 +826,7 @@ def _install_google_adk() -> Callable[[], None] | None:
         wrapped.append((cls, original))
         cls.run_async = _govern_adk_run_async(original)  # type: ignore[attr-defined]
 
-    def walk(cls: type) -> None:
+    def walk(cls: type[Any]) -> None:
         wrap(cls)
         for subclass in cls.__subclasses__():
             walk(subclass)
@@ -928,7 +928,7 @@ def _govern_strands_run_tool(original: Callable[..., Any]) -> Callable[..., Any]
     @functools.wraps(original)
     async def _run_tool(ctx: Any, *call_args: Any, **kwargs: Any) -> Any:
         runtime = _runtime()
-        tool_use = getattr(ctx, "tool_use", None)
+        tool_use: Any = getattr(ctx, "tool_use", None)
         if runtime is None or getattr(ctx, "tool", None) is None:
             # Ungoverned, or an unknown tool: nothing runs, Strands reports it.
             async for event in original(ctx, *call_args, **kwargs):
@@ -979,7 +979,7 @@ def _install_strands() -> Callable[[], None] | None:
     used as tools alike.
     """
     try:
-        executor = importlib.import_module("strands.tools.executors._executor")
+        executor: Any = importlib.import_module("strands.tools.executors._executor")
     except ImportError:
         return None
     original = executor.__dict__.get("_run_tool")
@@ -1243,27 +1243,27 @@ def _install_anthropic() -> Callable[[], None] | None:
         tools = importlib.import_module("anthropic.lib.tools")
     except ImportError:
         return None
-    roots = [getattr(tools, name, None) for name in ("BetaFunctionTool", "BetaAsyncFunctionTool", "BetaBuiltinFunctionTool", "BetaAsyncBuiltinFunctionTool")]
-    roots = [root for root in roots if isinstance(root, type)]
+    root_names = ("BetaFunctionTool", "BetaAsyncFunctionTool", "BetaBuiltinFunctionTool", "BetaAsyncBuiltinFunctionTool")
+    roots: list[type[Any]] = [root for root in (getattr(tools, name, None) for name in root_names) if isinstance(root, type)]
     if not roots:
         return None
-    wrapped: list[tuple[type, Any]] = []
-    hooks: list[tuple[type, Any]] = []
+    wrapped: list[tuple[type[Any], Any]] = []
+    hooks: list[tuple[type[Any], Any]] = []
 
-    def wrap(cls: type) -> None:
+    def wrap(cls: type[Any]) -> None:
         original = cls.__dict__.get("call")
         if original is None or getattr(original, _THOTH_GOVERNED, False) or getattr(original, "__isabstractmethod__", False):
             return
         wrapped.append((cls, original))
-        cls.call = _govern_anthropic_call(original)  # type: ignore[attr-defined]
+        cls.call = _govern_anthropic_call(original)
 
     def walk(cls: type) -> None:
         wrap(cls)
         for subclass in cls.__subclasses__():
             walk(subclass)
 
-    def subclass_hook(root: type, previous_hook: Any) -> Any:
-        def init_subclass(cls: type, **kwargs: Any) -> None:
+    def subclass_hook(root: type[Any], previous_hook: Any) -> Any:
+        def init_subclass(cls: type[Any], /, **kwargs: Any) -> None:
             if previous_hook is not None:
                 previous_hook.__func__(cls, **kwargs)
             else:
@@ -1275,12 +1275,12 @@ def _install_anthropic() -> Callable[[], None] | None:
     for root in roots:
         walk(root)
         previous_hook = root.__dict__.get("__init_subclass__")
-        root.__init_subclass__ = subclass_hook(root, previous_hook)  # type: ignore[assignment]
+        root.__init_subclass__ = subclass_hook(root, previous_hook)
         hooks.append((root, previous_hook))
 
     def undo() -> None:
         for cls, original in wrapped:
-            cls.call = original  # type: ignore[attr-defined]
+            cls.call = original
         for root, previous_hook in hooks:
             if previous_hook is None:
                 del root.__init_subclass__

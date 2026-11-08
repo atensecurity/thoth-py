@@ -6,7 +6,8 @@ from typing import Any
 
 def _rebuild_violation(cls: type, args: tuple[Any, ...]) -> Exception:
     """Rebuild an exception without calling its __init__, which needs arguments the message does not carry."""
-    return cls.__new__(cls, *args)
+    rebuilt: Exception = cls.__new__(cls, *args)
+    return rebuilt
 
 
 class ThothPolicyViolation(Exception):  # noqa: N818

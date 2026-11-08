@@ -158,8 +158,12 @@ class LocalScanner:
             text = leaf
             for step, regex in self._steps:
                 replacement = step["replacement"]
+
                 # A function replacement keeps the text literal: no backslash or group escapes.
-                text, n = regex.subn(lambda m, r=replacement: r.replace("{group1}", m.group(1) if m.re.groups else ""), text)
+                def substitute(m: re.Match[str], r: str = replacement) -> str:
+                    return r.replace("{group1}", m.group(1) if m.re.groups else "")
+
+                text, n = regex.subn(substitute, text)
                 if n:
                     counts[step["category"]] = counts.get(step["category"], 0) + n
         return [{"kind": "dlp", "category": c, "count": min(counts[c], self._max_count)} for c in self._categories if counts.get(c, 0) > 0]
