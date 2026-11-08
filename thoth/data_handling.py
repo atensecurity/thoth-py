@@ -228,7 +228,7 @@ def _map_leaves(value: Any, leaf: Any, budget: _Budget, depth: int) -> Any:
                 break
             out[_key_name(key)] = _map_leaves(item, leaf, budget, depth + 1)
         return out
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         items: list[Any] = []
         for item in value:
             if budget.remaining <= 0:
@@ -284,7 +284,7 @@ def _walk_context(node: Any, mode: str, salt: str, depth: int = 0) -> Any:
                 continue
             out[name] = _walk_context(item, mode, salt, depth + 1)
         return out
-    if isinstance(node, (list, tuple)):
+    if isinstance(node, list | tuple):
         return [_walk_context(item, mode, salt, depth + 1) for item in node]
     if isinstance(node, str) and len(node) > LONG_TEXT_CHARS:
         # Free text under an unremarkable key. Cannot be omitted from a list or
