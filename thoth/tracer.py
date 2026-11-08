@@ -183,9 +183,24 @@ def _apply_modified_call_args(
     raise ModifiedArgumentsNotApplicableError("the modified arguments do not match the shape of the call")
 
 
+ARGS_WITHHELD = "args_withheld"
+
+ARGS_WITHHELD_NOTE = (
+    "Thoth was not sent this call's argument values (data handling is set to withhold them), so a rule that needs the "
+    "values could not be checked and the call was held for review. Approve it, or change the data handling setting "
+    "(THOTH_DATA_HANDLING_TOOL_ARGUMENTS) if value-based rules should run."
+)
+
+
+def _is_args_withheld(*decisions: EnforcementDecision | None) -> bool:
+    return any(d is not None and d.decision_reason_code == ARGS_WITHHELD for d in decisions)
+
+
 def _modification_to_apply(
     decision: EnforcementDecision,
     step_up_initial: EnforcementDecision | None,
+    *,
+    arguments_withheld: bool = False,
 ) -> dict[str, Any] | None:
     """The modified arguments the call must run with, or None when it runs unchanged.
 
@@ -193,7 +208,16 @@ def _modification_to_apply(
     the hold only returns ALLOW, so the arguments the enforcer redacted when it
     held the call are on the initial decision. A MODIFY with no arguments yields
     an empty dict, which ``_apply_modified_call_args`` refuses.
+
+    When argument values were withheld from Thoth, nothing is applied: the server
+    only saw hashes or placeholders, so a modification of them (which a conforming
+    server never sends) would feed those into the tool. The call runs with the
+    arguments the caller passed.
     """
+    if arguments_withheld:
+        if decision.is_modify or (step_up_initial is not None and step_up_initial.modified_tool_args):
+            logger.warning("thoth: ignoring modified arguments from the enforcer because argument values are withheld (data handling)")
+        return None
     if decision.is_modify:
         return decision.modified_tool_args or {}
     if decision.is_allow and step_up_initial is not None and step_up_initial.modified_tool_args:
@@ -267,6 +291,8 @@ def _violation_from_decision(
     explanation: HumanExplanation | None = None,
 ) -> ThothPolicyViolation:
     context = _merge_decision_context(decision, fallback_decision) if fallback_decision is not None else _decision_context(decision)
+    if _is_args_withheld(decision, fallback_decision) and ARGS_WITHHELD_NOTE not in reason:
+        reason = f"{reason} [args_withheld: {ARGS_WITHHELD_NOTE}]"
     return ThothPolicyViolation(
         tool_name=tool_name,
         reason=reason,
@@ -639,7 +665,7 @@ class Tracer:
                 fallback_decision=step_up_initial,
                 explanation=explanation,
             )
-        modification = _modification_to_apply(decision, step_up_initial)
+        modification = _modification_to_apply(decision, step_up_initial, arguments_withheld=self._config.arguments_withheld)
         if modification is not None:
             try:
                 effective_args, effective_kwargs = _apply_modified_call_args(call_args, kwargs, modification)
@@ -766,7 +792,7 @@ class Tracer:
                 fallback_decision=step_up_initial,
                 explanation=explanation,
             )
-        modification = _modification_to_apply(decision, step_up_initial)
+        modification = _modification_to_apply(decision, step_up_initial, arguments_withheld=self._config.arguments_withheld)
         if modification is not None:
             try:
                 effective_args, effective_kwargs = _apply_modified_call_args(call_args, kwargs, modification)
@@ -865,7 +891,7 @@ class Tracer:
                 action_attestation_id=action_attestation_id,
             )
             self._log_decision(tool_name, decision, async_path=False, phase="observe", action_attestation_id=action_attestation_id)
-        except Exception:  # noqa: BLE001 - observing must never fail the call
+        except Exception:
             logger.warning("thoth: observe-mode enforcer check failed for %s", tool_name, exc_info=True)
 
     async def _aobserve(self, tool_name: str, tool_args: dict[str, Any] | None, action_attestation_id: str) -> None:
@@ -882,7 +908,7 @@ class Tracer:
                 action_attestation_id=action_attestation_id,
             )
             self._log_decision(tool_name, decision, async_path=True, phase="observe", action_attestation_id=action_attestation_id)
-        except Exception:  # noqa: BLE001 - observing must never fail the call
+        except Exception:
             logger.warning("thoth: observe-mode enforcer check failed for %s", tool_name, exc_info=True)
 
     def _log_decision(
@@ -894,6 +920,8 @@ class Tracer:
         phase: str = "enforce",
         action_attestation_id: str | None = None,
     ) -> None:
+        if decision.decision_reason_code == ARGS_WITHHELD:
+            logger.warning("thoth: %s held (args_withheld): %s", tool_name, ARGS_WITHHELD_NOTE)
         trace_id = self._config.enforcement_trace_id or self._session.session_id
         resolved_attestation_id = decision.action_attestation_id or action_attestation_id or self._config.action_attestation_id
         logger.debug(

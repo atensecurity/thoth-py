@@ -10,6 +10,8 @@ import uuid
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from thoth.data_handling import DataHandling, process_salt, resolve_prompts_mode, resolve_salt, resolve_tool_arguments_mode
+
 
 class EnforcementMode(StrEnum):
     OBSERVE = "observe"
@@ -166,6 +168,44 @@ class ThothConfig(BaseModel):
     # Optional outbound webhook URL for BLOCK/STEP_UP human explanation delivery.
     # SDK sends notifications asynchronously and never blocks tool execution.
     notification_webhook_url: str | None = None
+    # Opt-in drop/redact/hash at the source (see thoth.data_handling). Unset
+    # means no change. Each falls back to its THOTH_DATA_HANDLING_* variable and
+    # an invalid value raises here, so a typo never sends values unprotected.
+    data_handling_tool_arguments: str | None = Field(default=None, validate_default=True)
+    data_handling_prompts: str | None = Field(default=None, validate_default=True)
+    # Client-held hashing salt; never sent to Thoth, never printed or dumped.
+    data_handling_salt: str | None = Field(default=None, validate_default=True, repr=False, exclude=True)
+
+    @field_validator("data_handling_tool_arguments", mode="before")
+    @classmethod
+    def validate_data_handling_tool_arguments(cls, value: Any) -> Any:
+        return resolve_tool_arguments_mode(value)
+
+    @field_validator("data_handling_prompts", mode="before")
+    @classmethod
+    def validate_data_handling_prompts(cls, value: Any) -> Any:
+        return resolve_prompts_mode(value)
+
+    @field_validator("data_handling_salt", mode="before")
+    @classmethod
+    def validate_data_handling_salt(cls, value: Any) -> Any:
+        return resolve_salt(value)
+
+    @property
+    def data_handling(self) -> DataHandling | None:
+        """What this client withholds, or None when data handling is not configured."""
+        if self.data_handling_tool_arguments is None and self.data_handling_prompts is None:
+            return None
+        return DataHandling(
+            self.data_handling_tool_arguments,
+            self.data_handling_prompts,
+            self.data_handling_salt or process_salt(),
+        )
+
+    @property
+    def arguments_withheld(self) -> bool:
+        """True when tool-argument values are not sent to Thoth (hash, redact or drop)."""
+        return self.data_handling_tool_arguments is not None
 
     @field_validator("enforcement_trace_id", mode="before")
     @classmethod

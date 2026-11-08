@@ -4,6 +4,18 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ## Unreleased
 
+### Added
+
+- Opt-in withholding of values at the source. Set `data_handling_tool_arguments`
+  (`hash`, `redact` or `drop`) and `data_handling_prompts` (`hash` or `drop`) on
+  `init()`, the `instrument*()` functions or `ThothConfig`, or the environment
+  variables `THOTH_DATA_HANDLING_TOOL_ARGUMENTS`, `THOTH_DATA_HANDLING_PROMPTS` and
+  `THOTH_DATA_HANDLING_SALT`. Hashes use a client-held salt. The request declares
+  what was applied, a rule that needs argument values holds the call
+  (`args_withheld`) and says why, and modified arguments are never applied to a
+  call whose arguments were withheld. Nothing changes when unset; an invalid
+  value raises when the client is created.
+
 ## 0.7.0 - 2026-11-06
 
 ### Fixed

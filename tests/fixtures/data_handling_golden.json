@@ -1,0 +1,828 @@
+{
+  "version": 1,
+  "description": "Golden outputs for client-side data handling. Every Thoth SDK must reproduce `expected` byte for byte (compare as canonical JSON). `expected_omitted` means the field is not sent at all.",
+  "format": {
+    "hash": "\"hmac-sha256:\" + lowercase hex of HMAC-SHA256(key = UTF-8 bytes of salt, message = UTF-8 bytes of canonical JSON of the value)",
+    "canonical_json": "keys sorted by Unicode code point, separators ',' and ':' with no spaces, non-ASCII characters not escaped, strings escaped as JSON requires",
+    "tool_arguments.hash": "keys and structure kept; every leaf except null replaced by its hash; null stays null",
+    "tool_arguments.redact": "keys and structure kept; every leaf, null included, replaced by \"<redacted>\"",
+    "tool_arguments.drop": "tool_args omitted from the request",
+    "prompt.hash": "the whole value replaced by one hash; null stays null",
+    "prompt.drop": "the field is omitted",
+    "context": "in a context dict, the value under a prompt-bearing key (spelling-insensitive: lowercase, '_' and '-' removed, matched against the list below) at any depth gets the prompts mode (hash or omitted); any other string longer than 512 characters becomes its hash (hash mode) or \"<redacted>\" (drop mode); everything else is kept",
+    "context_prompt_keys": [
+      "comment",
+      "completion",
+      "content",
+      "conversation",
+      "conversationcontext",
+      "conversationinputtext",
+      "conversationoutputtext",
+      "description",
+      "goal",
+      "history",
+      "input",
+      "inputtext",
+      "instruction",
+      "instructions",
+      "message",
+      "messages",
+      "note",
+      "notes",
+      "output",
+      "prompt",
+      "prompts",
+      "query",
+      "question",
+      "response",
+      "summary",
+      "systemprompt",
+      "task",
+      "text",
+      "tooloutput",
+      "toolresult",
+      "transcript",
+      "usermessage",
+      "userprompt"
+    ],
+    "bounds": "the root is depth 0; a value deeper than depth 16 is replaced by \"<truncated>\"; at most 5000 values are visited, after which a dict gains \"_truncated\": \"<truncated>\" and a list ends with \"<truncated>\"",
+    "salt": "client-held string; golden cases use the salt in each case"
+  },
+  "cases": [
+    {
+      "name": "args/flat_strings/hash",
+      "kind": "tool_arguments",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": {
+        "to": "alice@example.com",
+        "subject": "Quarterly numbers"
+      },
+      "expected": {
+        "to": "hmac-sha256:bf8a0dc3bf9ec6f1c64cbe369d94579e29bdbf1660639992118b01257ddb0c4d",
+        "subject": "hmac-sha256:a13d80d25159fa07fdb7141e151d32365d6834d98d8fcfd8dee766ffb8154f65"
+      }
+    },
+    {
+      "name": "args/flat_strings/redact",
+      "kind": "tool_arguments",
+      "mode": "redact",
+      "salt": "golden-salt-v1",
+      "input": {
+        "to": "alice@example.com",
+        "subject": "Quarterly numbers"
+      },
+      "expected": {
+        "to": "<redacted>",
+        "subject": "<redacted>"
+      }
+    },
+    {
+      "name": "args/flat_strings/drop",
+      "kind": "tool_arguments",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": {
+        "to": "alice@example.com",
+        "subject": "Quarterly numbers"
+      },
+      "expected_omitted": true
+    },
+    {
+      "name": "args/scalars/hash",
+      "kind": "tool_arguments",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": {
+        "count": 3,
+        "ratio": 1.5,
+        "flag": true,
+        "off": false,
+        "none": null,
+        "neg": -7
+      },
+      "expected": {
+        "count": "hmac-sha256:5aff67e8adf9a16011e75b4d16dc6da09b9df33469de7b0c837c8a2f9b045708",
+        "ratio": "hmac-sha256:0d9776c0c74f18c49995447e1db1c60cae4969056bf20aa23d8df01934c578ba",
+        "flag": "hmac-sha256:0e9727b0354217681aad12f0103b85a7e7960e5d31f3cab3f714525574ef8e8c",
+        "off": "hmac-sha256:86ee4f11f7f9741e8ef27e6b20eef9d960b95559ff77436464517d1209f9b5c9",
+        "none": null,
+        "neg": "hmac-sha256:7bf592f3e8d62e301fa83d78964205ab8398ef4261ba9cd649446daaaf2cbfbb"
+      }
+    },
+    {
+      "name": "args/scalars/redact",
+      "kind": "tool_arguments",
+      "mode": "redact",
+      "salt": "golden-salt-v1",
+      "input": {
+        "count": 3,
+        "ratio": 1.5,
+        "flag": true,
+        "off": false,
+        "none": null,
+        "neg": -7
+      },
+      "expected": {
+        "count": "<redacted>",
+        "ratio": "<redacted>",
+        "flag": "<redacted>",
+        "off": "<redacted>",
+        "none": "<redacted>",
+        "neg": "<redacted>"
+      }
+    },
+    {
+      "name": "args/scalars/drop",
+      "kind": "tool_arguments",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": {
+        "count": 3,
+        "ratio": 1.5,
+        "flag": true,
+        "off": false,
+        "none": null,
+        "neg": -7
+      },
+      "expected_omitted": true
+    },
+    {
+      "name": "args/nested/hash",
+      "kind": "tool_arguments",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": {
+        "q": {
+          "filters": [
+            {
+              "field": "name",
+              "value": "Ada"
+            },
+            {
+              "field": "age",
+              "value": 36
+            }
+          ],
+          "limit": 10
+        }
+      },
+      "expected": {
+        "q": {
+          "filters": [
+            {
+              "field": "hmac-sha256:85bffd8369c50ac4165c513d08274b16731d744ca2e6f6ccd1f52f42ea8e9a77",
+              "value": "hmac-sha256:11435d673626db154efdc4d86ed6475639a452c0b2b8369c158e0cdef51f7ee6"
+            },
+            {
+              "field": "hmac-sha256:e49fc697dafde22777152da2a762b18b929ea98e586beaa1936003144785f9b9",
+              "value": "hmac-sha256:e9c5ba3bf064af51b3deba0fbcf0d7e3f3676bfee233341a460e9e6ffaa89de5"
+            }
+          ],
+          "limit": "hmac-sha256:f1902f28ad76261e1575b05328071ead81514281a07d9e9fc9374bad2ce879f1"
+        }
+      }
+    },
+    {
+      "name": "args/nested/redact",
+      "kind": "tool_arguments",
+      "mode": "redact",
+      "salt": "golden-salt-v1",
+      "input": {
+        "q": {
+          "filters": [
+            {
+              "field": "name",
+              "value": "Ada"
+            },
+            {
+              "field": "age",
+              "value": 36
+            }
+          ],
+          "limit": 10
+        }
+      },
+      "expected": {
+        "q": {
+          "filters": [
+            {
+              "field": "<redacted>",
+              "value": "<redacted>"
+            },
+            {
+              "field": "<redacted>",
+              "value": "<redacted>"
+            }
+          ],
+          "limit": "<redacted>"
+        }
+      }
+    },
+    {
+      "name": "args/nested/drop",
+      "kind": "tool_arguments",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": {
+        "q": {
+          "filters": [
+            {
+              "field": "name",
+              "value": "Ada"
+            },
+            {
+              "field": "age",
+              "value": 36
+            }
+          ],
+          "limit": 10
+        }
+      },
+      "expected_omitted": true
+    },
+    {
+      "name": "args/unicode/hash",
+      "kind": "tool_arguments",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": {
+        "note": "café ☃ 日本語",
+        "quote": "say \"hi\"\n\ttab"
+      },
+      "expected": {
+        "note": "hmac-sha256:ed0b1668ce7c67a4b4cf4beca4c76b341971035763d92370c4736738317a7f7e",
+        "quote": "hmac-sha256:ccdf3e0bfb240e4866b916a47c8a497c35c633cfe697958c23ecf53bd5bd5d15"
+      }
+    },
+    {
+      "name": "args/unicode/redact",
+      "kind": "tool_arguments",
+      "mode": "redact",
+      "salt": "golden-salt-v1",
+      "input": {
+        "note": "café ☃ 日本語",
+        "quote": "say \"hi\"\n\ttab"
+      },
+      "expected": {
+        "note": "<redacted>",
+        "quote": "<redacted>"
+      }
+    },
+    {
+      "name": "args/unicode/drop",
+      "kind": "tool_arguments",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": {
+        "note": "café ☃ 日本語",
+        "quote": "say \"hi\"\n\ttab"
+      },
+      "expected_omitted": true
+    },
+    {
+      "name": "args/list_root_values/hash",
+      "kind": "tool_arguments",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": {
+        "ids": [
+          "a",
+          "b",
+          3,
+          null
+        ]
+      },
+      "expected": {
+        "ids": [
+          "hmac-sha256:076ada9f074a56269d636eee5204111abfdd07ab464801b10db73dd2bc4b60ba",
+          "hmac-sha256:8bc9b3bac75a93e66f7b98586088bdfdaca2d5d199370015901267e0afc41c2d",
+          "hmac-sha256:5aff67e8adf9a16011e75b4d16dc6da09b9df33469de7b0c837c8a2f9b045708",
+          null
+        ]
+      }
+    },
+    {
+      "name": "args/list_root_values/redact",
+      "kind": "tool_arguments",
+      "mode": "redact",
+      "salt": "golden-salt-v1",
+      "input": {
+        "ids": [
+          "a",
+          "b",
+          3,
+          null
+        ]
+      },
+      "expected": {
+        "ids": [
+          "<redacted>",
+          "<redacted>",
+          "<redacted>",
+          "<redacted>"
+        ]
+      }
+    },
+    {
+      "name": "args/list_root_values/drop",
+      "kind": "tool_arguments",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": {
+        "ids": [
+          "a",
+          "b",
+          3,
+          null
+        ]
+      },
+      "expected_omitted": true
+    },
+    {
+      "name": "args/empty/hash",
+      "kind": "tool_arguments",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": {},
+      "expected": {}
+    },
+    {
+      "name": "args/empty/redact",
+      "kind": "tool_arguments",
+      "mode": "redact",
+      "salt": "golden-salt-v1",
+      "input": {},
+      "expected": {}
+    },
+    {
+      "name": "args/empty/drop",
+      "kind": "tool_arguments",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": {},
+      "expected_omitted": true
+    },
+    {
+      "name": "args/empty_containers/hash",
+      "kind": "tool_arguments",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": {
+        "a": [],
+        "b": {}
+      },
+      "expected": {
+        "a": [],
+        "b": {}
+      }
+    },
+    {
+      "name": "args/empty_containers/redact",
+      "kind": "tool_arguments",
+      "mode": "redact",
+      "salt": "golden-salt-v1",
+      "input": {
+        "a": [],
+        "b": {}
+      },
+      "expected": {
+        "a": [],
+        "b": {}
+      }
+    },
+    {
+      "name": "args/empty_containers/drop",
+      "kind": "tool_arguments",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": {
+        "a": [],
+        "b": {}
+      },
+      "expected_omitted": true
+    },
+    {
+      "name": "args/too_deep/hash",
+      "kind": "tool_arguments",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": {
+        "d": {
+          "d": {
+            "d": {
+              "d": {
+                "d": {
+                  "d": {
+                    "d": {
+                      "d": {
+                        "d": {
+                          "d": {
+                            "d": {
+                              "d": {
+                                "d": {
+                                  "d": {
+                                    "d": {
+                                      "d": {
+                                        "d": {
+                                          "d": {
+                                            "leaf": "SECRET"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "d": {
+          "d": {
+            "d": {
+              "d": {
+                "d": {
+                  "d": {
+                    "d": {
+                      "d": {
+                        "d": {
+                          "d": {
+                            "d": {
+                              "d": {
+                                "d": {
+                                  "d": {
+                                    "d": {
+                                      "d": {
+                                        "d": "<truncated>"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "args/too_deep/redact",
+      "kind": "tool_arguments",
+      "mode": "redact",
+      "salt": "golden-salt-v1",
+      "input": {
+        "d": {
+          "d": {
+            "d": {
+              "d": {
+                "d": {
+                  "d": {
+                    "d": {
+                      "d": {
+                        "d": {
+                          "d": {
+                            "d": {
+                              "d": {
+                                "d": {
+                                  "d": {
+                                    "d": {
+                                      "d": {
+                                        "d": {
+                                          "d": {
+                                            "leaf": "SECRET"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expected": {
+        "d": {
+          "d": {
+            "d": {
+              "d": {
+                "d": {
+                  "d": {
+                    "d": {
+                      "d": {
+                        "d": {
+                          "d": {
+                            "d": {
+                              "d": {
+                                "d": {
+                                  "d": {
+                                    "d": {
+                                      "d": {
+                                        "d": "<truncated>"
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "args/too_deep/drop",
+      "kind": "tool_arguments",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": {
+        "d": {
+          "d": {
+            "d": {
+              "d": {
+                "d": {
+                  "d": {
+                    "d": {
+                      "d": {
+                        "d": {
+                          "d": {
+                            "d": {
+                              "d": {
+                                "d": {
+                                  "d": {
+                                    "d": {
+                                      "d": {
+                                        "d": {
+                                          "d": {
+                                            "leaf": "SECRET"
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "expected_omitted": true
+    },
+    {
+      "name": "prompt/text/hash",
+      "kind": "prompt",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": "Please summarise the attached medical notes for Ada",
+      "expected": "hmac-sha256:2cafb628fa1f9ed7d34d38d0ac2a49588d3d967bcdfeec167a9e9e6652f87488"
+    },
+    {
+      "name": "prompt/text/drop",
+      "kind": "prompt",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": "Please summarise the attached medical notes for Ada",
+      "expected_omitted": true
+    },
+    {
+      "name": "prompt/empty_string/hash",
+      "kind": "prompt",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": "",
+      "expected": "hmac-sha256:b13f30c47a150e2eb8712c2d7e6c0eed21096aef0b4b0af3a26d8c871ddf52bf"
+    },
+    {
+      "name": "prompt/empty_string/drop",
+      "kind": "prompt",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": "",
+      "expected_omitted": true
+    },
+    {
+      "name": "prompt/number/hash",
+      "kind": "prompt",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": 42,
+      "expected": "hmac-sha256:cd4155bde5b1703b08d8d5f237a678831909b4a302a5a6a188d65dfaf8a2056f"
+    },
+    {
+      "name": "prompt/number/drop",
+      "kind": "prompt",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": 42,
+      "expected_omitted": true
+    },
+    {
+      "name": "prompt/object/hash",
+      "kind": "prompt",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": {
+        "role": "user",
+        "content": "hi"
+      },
+      "expected": "hmac-sha256:7764076a69c0e1f0c7375061766545e8674e7869d8e3eb7967316acff017c007"
+    },
+    {
+      "name": "prompt/object/drop",
+      "kind": "prompt",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": {
+        "role": "user",
+        "content": "hi"
+      },
+      "expected_omitted": true
+    },
+    {
+      "name": "prompt/null/hash",
+      "kind": "prompt",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": null,
+      "expected": null
+    },
+    {
+      "name": "prompt/null/drop",
+      "kind": "prompt",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": null,
+      "expected_omitted": true
+    },
+    {
+      "name": "context/ids_untouched/hash",
+      "kind": "context",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": {
+        "task_id": "t-1",
+        "initiated_by": "alice",
+        "chain": [
+          "a",
+          "b"
+        ]
+      },
+      "expected": {
+        "task_id": "t-1",
+        "initiated_by": "alice",
+        "chain": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    {
+      "name": "context/ids_untouched/drop",
+      "kind": "context",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": {
+        "task_id": "t-1",
+        "initiated_by": "alice",
+        "chain": [
+          "a",
+          "b"
+        ]
+      },
+      "expected": {
+        "task_id": "t-1",
+        "initiated_by": "alice",
+        "chain": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    {
+      "name": "context/prompt_keys/hash",
+      "kind": "context",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": {
+        "task_id": "t-1",
+        "Prompt": "tell me secrets",
+        "nested": {
+          "user_message": "hello",
+          "ok": "kept"
+        }
+      },
+      "expected": {
+        "task_id": "t-1",
+        "Prompt": "hmac-sha256:78dab176c98b0838b72d9e47957449959d9dd2dd0ff9c9ccae293cef05e9c222",
+        "nested": {
+          "user_message": "hmac-sha256:aa5b63cad2f3459d7cc70c7ff6b7786de6ede66320ae6359b9447d02e0740f75",
+          "ok": "kept"
+        }
+      }
+    },
+    {
+      "name": "context/prompt_keys/drop",
+      "kind": "context",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": {
+        "task_id": "t-1",
+        "Prompt": "tell me secrets",
+        "nested": {
+          "user_message": "hello",
+          "ok": "kept"
+        }
+      },
+      "expected": {
+        "task_id": "t-1",
+        "nested": {
+          "ok": "kept"
+        }
+      }
+    },
+    {
+      "name": "context/long_text/hash",
+      "kind": "context",
+      "mode": "hash",
+      "salt": "golden-salt-v1",
+      "input": {
+        "note_x": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "short": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "list": [
+          "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "d"
+        ]
+      },
+      "expected": {
+        "note_x": "hmac-sha256:0ccd105bdd87dcc1ac5420b8f1869a431710921be47402afb5ba3005eac63421",
+        "short": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "list": [
+          "hmac-sha256:0a57f61d442515396d07ecc69475eefe2030fc80f03cd1f59b57128b51f9651e",
+          "d"
+        ]
+      }
+    },
+    {
+      "name": "context/long_text/drop",
+      "kind": "context",
+      "mode": "drop",
+      "salt": "golden-salt-v1",
+      "input": {
+        "note_x": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "short": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "list": [
+          "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "d"
+        ]
+      },
+      "expected": {
+        "note_x": "<redacted>",
+        "short": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "list": [
+          "<redacted>",
+          "d"
+        ]
+      }
+    }
+  ]
+}

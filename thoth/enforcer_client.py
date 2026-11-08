@@ -86,6 +86,8 @@ class EnforcerClient:
         key and enforcer URL (see enforcer_http_clients)."""
         configure_thoth_logging_from_env()
         self._config = config
+        # Resolved once: the handler is immutable, so concurrent calls share it.
+        self._data_handling = config.data_handling
         if http is None or async_http is None:
             http, async_http = enforcer_http_clients(config)
         self._http = http
@@ -152,6 +154,10 @@ class EnforcerClient:
             payload["auth_context"] = auth_context
         if self._config.delegation_context:
             payload["delegation_context"] = dict(self._config.delegation_context)
+        if self._data_handling is not None:
+            # Last, so nothing added above reaches the wire untransformed. The
+            # explain payload is built on this one, so it is covered too.
+            self._data_handling.apply(payload)
         return payload
 
     def _explain_payload(

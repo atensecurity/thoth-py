@@ -1,0 +1,194 @@
+{
+  "payloads": {
+    "enforce": {
+      "action_attestation_id": "att-1",
+      "agent_id": "agent-1",
+      "approved_scope": [
+        "read_file",
+        "send_email"
+      ],
+      "auth_context": {
+        "message": "hello",
+        "scope": "read"
+      },
+      "data_classification": "internal",
+      "delegation_context": {
+        "chain": [
+          "a",
+          "b"
+        ]
+      },
+      "enforcement_mode": "block",
+      "enforcement_trace_id": "trace-1",
+      "environment": "prod",
+      "identity_binding": {
+        "agent_id": "agent-1",
+        "device": "d-1",
+        "tenant_id": "ws-1",
+        "user_id": "user-1"
+      },
+      "metadata": {
+        "trace": "x"
+      },
+      "model_name": "m",
+      "model_provider": "p",
+      "purpose": "triage",
+      "session_id": "sess-1",
+      "session_intent": "support",
+      "session_tool_calls": [
+        "read_file"
+      ],
+      "task_context": {
+        "initiated_by": "alice",
+        "prompt": "summarise my medical notes",
+        "task_id": "t-1"
+      },
+      "tenant_id": "ws-1",
+      "tool_args": {
+        "count": 3,
+        "nested": {
+          "items": [
+            1,
+            "two",
+            null,
+            true
+          ],
+          "token": "sk-SECRET"
+        },
+        "path": "/etc/hosts"
+      },
+      "tool_name": "read_file",
+      "user_id": "user-1"
+    },
+    "enforce_no_args": {
+      "action_attestation_id": "att-2",
+      "agent_id": "agent-1",
+      "approved_scope": [
+        "read_file",
+        "send_email"
+      ],
+      "auth_context": {
+        "message": "hello",
+        "scope": "read"
+      },
+      "data_classification": "internal",
+      "delegation_context": {
+        "chain": [
+          "a",
+          "b"
+        ]
+      },
+      "enforcement_mode": "block",
+      "enforcement_trace_id": "trace-1",
+      "environment": "prod",
+      "identity_binding": {
+        "agent_id": "agent-1",
+        "device": "d-1",
+        "tenant_id": "ws-1",
+        "user_id": "user-1"
+      },
+      "metadata": {
+        "trace": "x"
+      },
+      "model_name": "m",
+      "model_provider": "p",
+      "purpose": "triage",
+      "session_id": "sess-1",
+      "session_intent": "support",
+      "session_tool_calls": [
+        "read_file"
+      ],
+      "task_context": {
+        "initiated_by": "alice",
+        "prompt": "summarise my medical notes",
+        "task_id": "t-1"
+      },
+      "tenant_id": "ws-1",
+      "tool_name": "read_file",
+      "user_id": "user-1"
+    },
+    "explain": {
+      "action_attestation_id": "att-1",
+      "action_classification": null,
+      "agent_id": "agent-1",
+      "approved_scope": [
+        "read_file",
+        "send_email"
+      ],
+      "auth_context": {
+        "message": "hello",
+        "scope": "read"
+      },
+      "data_classification": "internal",
+      "decision": "STEP_UP",
+      "decision_reason_code": "x",
+      "delegation_context": {
+        "chain": [
+          "a",
+          "b"
+        ]
+      },
+      "enforcement_mode": "block",
+      "enforcement_trace_id": "trace-1",
+      "environment": "prod",
+      "identity_binding": {
+        "agent_id": "agent-1",
+        "device": "d-1",
+        "tenant_id": "ws-1",
+        "user_id": "user-1"
+      },
+      "matched_control_ids": [],
+      "matched_rule_ids": [],
+      "metadata": {
+        "trace": "x"
+      },
+      "model_name": "m",
+      "model_provider": "p",
+      "policy_references": [],
+      "purpose": "triage",
+      "regulatory_regimes": [],
+      "risk_score": 0.5,
+      "session_id": "sess-1",
+      "session_intent": "support",
+      "session_tool_calls": [
+        "read_file"
+      ],
+      "step_up_timeout_seconds": null,
+      "task_context": {
+        "initiated_by": "alice",
+        "prompt": "summarise my medical notes",
+        "task_id": "t-1"
+      },
+      "tenant_id": "ws-1",
+      "tool_args": {
+        "count": 3,
+        "nested": {
+          "items": [
+            1,
+            "two",
+            null,
+            true
+          ],
+          "token": "sk-SECRET"
+        },
+        "path": "/etc/hosts"
+      },
+      "tool_name": "read_file",
+      "user_id": "user-1",
+      "violation_id": "v-1"
+    }
+  },
+  "tool_args": {
+    "count": 3,
+    "nested": {
+      "items": [
+        1,
+        "two",
+        null,
+        true
+      ],
+      "token": "sk-SECRET"
+    },
+    "path": "/etc/hosts"
+  }
+}

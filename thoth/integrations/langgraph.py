@@ -35,7 +35,7 @@ from thoth.models import (
 )
 from thoth.session import SessionContext
 from thoth.step_up import StepUpClient
-from thoth.tracer import ModifiedArgumentsNotApplicableError, _apply_modified_call_args, _modification_to_apply
+from thoth.tracer import ARGS_WITHHELD_NOTE, ModifiedArgumentsNotApplicableError, _apply_modified_call_args, _is_args_withheld, _modification_to_apply
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -189,6 +189,8 @@ def _violation_from_decision(
     fallback_decision: EnforcementDecision | None = None,
 ) -> ThothPolicyViolation:
     context = _merge_decision_context(decision, fallback_decision) if fallback_decision is not None else _decision_context(decision)
+    if _is_args_withheld(decision, fallback_decision) and ARGS_WITHHELD_NOTE not in reason:
+        reason = f"{reason} [args_withheld: {ARGS_WITHHELD_NOTE}]"
     return ThothPolicyViolation(
         tool_name=tool_name,
         reason=reason,
@@ -681,7 +683,7 @@ class _LangGraphRuntime:
                 decision,
                 fallback_decision=step_up_initial,
             )
-        modification = _modification_to_apply(decision, step_up_initial)
+        modification = _modification_to_apply(decision, step_up_initial, arguments_withheld=self._config.arguments_withheld)
         if modification is not None:
             try:
                 modified_args, modified_kwargs = _apply_modified_call_args(call_args, call_kwargs, modification)
@@ -749,7 +751,7 @@ class _LangGraphRuntime:
                 decision,
                 fallback_decision=step_up_initial,
             )
-        modification = _modification_to_apply(decision, step_up_initial)
+        modification = _modification_to_apply(decision, step_up_initial, arguments_withheld=self._config.arguments_withheld)
         if modification is not None:
             try:
                 modified_args, modified_kwargs = _apply_modified_call_args(call_args, call_kwargs, modification)
@@ -879,6 +881,9 @@ def _build_runtime(
     task_context: str | dict[str, Any] | None,
     fail_open: bool,
     event_ingest_token: str | None,
+    data_handling_tool_arguments: str | None = None,
+    data_handling_prompts: str | None = None,
+    data_handling_salt: str | None = None,
 ) -> _LangGraphRuntime:
     configure_thoth_logging_from_env()
     resolved_api_key = api_key or os.getenv("THOTH_API_KEY")
@@ -901,6 +906,9 @@ def _build_runtime(
         environment=(environment or os.getenv("THOTH_ENVIRONMENT") or "prod").strip().lower() or "prod",
         enforcement_trace_id=enforcement_trace_id,
         fail_open=fail_open,
+        data_handling_tool_arguments=data_handling_tool_arguments,
+        data_handling_prompts=data_handling_prompts,
+        data_handling_salt=data_handling_salt,
     )
     session = SessionContext(config, session_id=session_id)
     _CURRENT_SESSION.set(session)
@@ -1063,6 +1071,9 @@ def instrument_langgraph(
     task_context: str | dict[str, Any] | None = None,
     fail_open: bool = False,
     event_ingest_token: str | None = None,
+    data_handling_tool_arguments: str | None = None,
+    data_handling_prompts: str | None = None,
+    data_handling_salt: str | None = None,
 ) -> Any:
     """Instrument LangGraph tools, ToolNode graphs, or compiled graphs in one call.
 
@@ -1110,6 +1121,9 @@ def instrument_langgraph(
         task_context=task_context,
         fail_open=fail_open,
         event_ingest_token=event_ingest_token,
+        data_handling_tool_arguments=data_handling_tool_arguments,
+        data_handling_prompts=data_handling_prompts,
+        data_handling_salt=data_handling_salt,
     )
 
     if isinstance(graph_or_tools, list):
@@ -1141,6 +1155,9 @@ def instrument_tool_node(
     task_context: str | dict[str, Any] | None = None,
     fail_open: bool = False,
     event_ingest_token: str | None = None,
+    data_handling_tool_arguments: str | None = None,
+    data_handling_prompts: str | None = None,
+    data_handling_salt: str | None = None,
 ) -> Any:
     """Instrument a list of tools and return a governed LangGraph ToolNode."""
 
@@ -1163,6 +1180,9 @@ def instrument_tool_node(
         task_context=task_context,
         fail_open=fail_open,
         event_ingest_token=event_ingest_token,
+        data_handling_tool_arguments=data_handling_tool_arguments,
+        data_handling_prompts=data_handling_prompts,
+        data_handling_salt=data_handling_salt,
     )
     return tool_node_type(governed_tools)
 
@@ -1185,6 +1205,9 @@ def thoth_graph(
     task_context: str | dict[str, Any] | None = None,
     fail_open: bool = False,
     event_ingest_token: str | None = None,
+    data_handling_tool_arguments: str | None = None,
+    data_handling_prompts: str | None = None,
+    data_handling_salt: str | None = None,
 ) -> Callable[[Callable[P, Any]], Callable[P, Any]]:
     """Decorator that instruments ToolNode tools on the graph returned by a builder."""
 
@@ -1210,6 +1233,9 @@ def thoth_graph(
                 task_context=task_context,
                 fail_open=fail_open,
                 event_ingest_token=event_ingest_token,
+                data_handling_tool_arguments=data_handling_tool_arguments,
+                data_handling_prompts=data_handling_prompts,
+                data_handling_salt=data_handling_salt,
             )
 
         return wrapped

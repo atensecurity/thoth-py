@@ -29,8 +29,9 @@ stepping up for human approval, or silently observing based on your configured e
 9. [Handling Violations](#handling-violations)
 10. [Step-Up Authentication](#step-up-authentication)
 11. [Session Inspection](#session-inspection)
-12. [Configuration Reference](#configuration-reference)
-13. [Dashboard](#dashboard)
+12. [Withholding Values From Thoth](#withholding-values-from-thoth)
+13. [Configuration Reference](#configuration-reference)
+14. [Dashboard](#dashboard)
 
 ---
 
@@ -740,6 +741,74 @@ if session:
 
 ---
 
+## Withholding Values From Thoth
+
+By default the SDK sends a tool call's argument values to Thoth so value-based rules and outbound
+data checks can run. You can opt in, per client, to keeping the values on your side. With nothing
+set, behavior is unchanged.
+
+```python
+import thoth
+
+thoth.init(
+    data_handling_tool_arguments="redact",  # or "hash" | "drop"
+    data_handling_prompts="hash",           # or "drop"
+    data_handling_salt="a-long-random-secret",  # optional, see below
+)
+```
+
+Or set the environment, which every entry point reads (`init()`, `instrument*()`, `ThothConfig`):
+
+| Variable | Values | Effect |
+|---|---|---|
+| `THOTH_DATA_HANDLING_TOOL_ARGUMENTS` | `hash`, `redact`, `drop` | What happens to tool-argument values before the request leaves the process. |
+| `THOTH_DATA_HANDLING_PROMPTS` | `hash`, `drop` | What happens to prompt-bearing text in the context you pass. |
+| `THOTH_DATA_HANDLING_SALT` | any string | Salt for `hash`. Unset means a random salt per process. |
+
+An invalid value raises when the client is created. The SDK never falls back to sending the raw
+value.
+
+**Tool arguments**
+
+- `hash`: keys and structure are kept, and each value (string, number, boolean) becomes
+  `hmac-sha256:<hex>`, an HMAC-SHA256 keyed with your salt. `null` stays `null`.
+- `redact`: keys and structure are kept, and each value becomes `"<redacted>"`.
+- `drop`: no arguments are sent.
+
+Nested arguments are walked to depth 16 and 5,000 values. Anything beyond that becomes `"<truncated>"`.
+
+**Prompts.** The SDK has no prompt field of its own. The mode applies to the context you pass in
+`task_context`, `auth_context`, `delegation_context`, `identity_binding` and `request_metadata`:
+
+- Values under prompt-bearing key names (`prompt`, `message(s)`, `input`, `query`, `question`, `text`,
+  `content`, `instruction(s)`, `task`, `goal`, `description`, `summary`, `note(s)`, `comment`,
+  `conversation`, `history`, `transcript`, `completion`, `response`, `output`, `tool_result`,
+  `tool_output`, at any depth, ignoring case, `_` and `-`) are hashed or omitted.
+- Any other string longer than 512 characters in those dicts is treated as free text: hashed in `hash` mode,
+  replaced by `"<redacted>"` in `drop` mode.
+- Everything else (ids, `initiated_by`, `task_id`, delegation chains) is kept, because policy reads it.
+- `session_intent`, `purpose` and `data_classification` are labels you set, not user text, so they are
+  sent as given. Do not put user text in them.
+
+**The salt.** Hashing uses a salt that only your process holds; Thoth has no key to it. Equal values
+produce equal hashes only under the same salt. With the default random salt that means within one
+process, which is enough to see that a value repeated in a session but not across restarts or
+workers. Set the same `THOTH_DATA_HANDLING_SALT` on every process that should match values. Anyone who
+has the salt can confirm a guess at a low-entropy value (a short code, a name), so keep it secret.
+
+**What still reaches Thoth.** Tool names, decisions, session and user ids, timing, and the tool-call
+sequence. Key names are sent in `hash` and `redact` mode, and not in `drop`. The SDK declares what it
+applied, and Thoth records that declaration with the decision.
+
+**What you give up.** Rules that read argument values (`arg.path contains ...`, regex, free-text
+keywords) and outbound data checks cannot run on values Thoth does not have. When such a rule exists, the
+call is held (`STEP_UP` with reason code `args_withheld`) instead of being decided on values it
+cannot see, and the `ThothPolicyViolation` message says so. With `drop`, some checks fall back on tool-name
+heuristics. A server never returns modified arguments for a call whose arguments were withheld; if one
+ever does, the SDK ignores it and logs a warning, and the tool runs with the arguments you passed.
+
+---
+
 ## Configuration Reference
 
 ### `instrument()` parameters
@@ -797,6 +866,9 @@ if session:
 | `environment` | `str` | `"prod"` | Environment selector included in `/v1/enforce` payload. |
 | `enforcement_trace_id` | `str \| None` | `None` | Optional explicit trace ID; falls back to `session_id`. |
 | `fail_open` | `bool` | `False` | Allow on enforcer infrastructure failures (`network`, `429`, `5xx`). Auth failures still block. |
+| `data_handling_tool_arguments` | `str \| None` | `$THOTH_DATA_HANDLING_TOOL_ARGUMENTS` | `hash`, `redact` or `drop` tool-argument values before sending. Unset sends them as before. See [Withholding Values From Thoth](#withholding-values-from-thoth). |
+| `data_handling_prompts` | `str \| None` | `$THOTH_DATA_HANDLING_PROMPTS` | `hash` or `drop` prompt-bearing text in the context dicts. |
+| `data_handling_salt` | `str \| None` | `$THOTH_DATA_HANDLING_SALT` | Client-held salt for `hash`; random per process when unset. Never sent. |
 
 ### Environment Variables
 
@@ -808,6 +880,9 @@ if session:
 | `THOTH_API_URL` | Tenant API base URL for both event ingestion and policy checks. Defaults to `https://api.atensecurity.com` (trial and self-serve); Enterprise example: `https://enforce.<tenant>.<apex-domain>` |
 | `THOTH_ENVIRONMENT` | Optional environment selector (`prod`, `staging`, `dev`, etc.) sent to the enforcer payload. |
 | `THOTH_FAIL_OPEN` | Optional fail-open switch (`true/false`). When true, enforcer `network/429/5xx` failures return `ALLOW`; auth failures still block. |
+| `THOTH_DATA_HANDLING_TOOL_ARGUMENTS` | Optional `hash`, `redact` or `drop`: withhold tool-argument values from Thoth (see above). |
+| `THOTH_DATA_HANDLING_PROMPTS` | Optional `hash` or `drop` for prompt-bearing context text. |
+| `THOTH_DATA_HANDLING_SALT` | Optional salt for `hash`; random per process when unset. |
 | `THOTH_LOG_LEVEL` | Optional SDK logger level override (`DEBUG`, `INFO`, `WARNING`, `ERROR`). If unset, SDK falls back to `LOG_LEVEL` when present. |
 
 Resolution precedence:

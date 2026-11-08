@@ -232,6 +232,9 @@ def init(
     approved_scope: list[str] | None = None,
     environment: str | None = None,
     frameworks: list[str] | None = None,
+    data_handling_tool_arguments: str | None = None,
+    data_handling_prompts: str | None = None,
+    data_handling_salt: str | None = None,
 ) -> list[str]:
     """Govern every tool of the supported frameworks installed in this process.
 
@@ -256,6 +259,9 @@ def init(
         enforcement=EnforcementMode.BLOCK,
         environment=(environment or os.getenv("THOTH_ENVIRONMENT") or "prod").strip().lower() or "prod",
         event_ingest_token=os.getenv("THOTH_EVENT_INGEST_TOKEN"),
+        data_handling_tool_arguments=data_handling_tool_arguments,
+        data_handling_prompts=data_handling_prompts,
+        data_handling_salt=data_handling_salt,
     )
     with _INIT_LOCK:
         shutdown()

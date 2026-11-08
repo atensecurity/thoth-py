@@ -240,6 +240,9 @@ def _build_components(
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
+    data_handling_tool_arguments: str | None = None,
+    data_handling_prompts: str | None = None,
+    data_handling_salt: str | None = None,
 ) -> tuple[ThothConfig, SessionContext, HttpEmitter, EnforcerClient, StepUpClient, Tracer]:
     """Construct the full Thoth component stack from caller parameters."""
     configure_thoth_logging_from_env()
@@ -271,6 +274,9 @@ def _build_components(
         request_metadata=request_metadata or {},
         environment=resolved_environment,
         enforcement_trace_id=enforcement_trace_id,
+        data_handling_tool_arguments=data_handling_tool_arguments,
+        data_handling_prompts=data_handling_prompts,
+        data_handling_salt=data_handling_salt,
     )
     session = SessionContext(config, session_id=session_id)
     _CURRENT_SESSION.set(session)
@@ -312,6 +318,9 @@ def instrument(
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
+    data_handling_tool_arguments: str | None = None,
+    data_handling_prompts: str | None = None,
+    data_handling_salt: str | None = None,
 ) -> Any:
     """
     Instrument an AI agent with Thoth governance.
@@ -348,6 +357,9 @@ def instrument(
         environment,
         enforcement_trace_id,
         event_ingest_token,
+        data_handling_tool_arguments,
+        data_handling_prompts,
+        data_handling_salt,
     )
     publish_tool_inventory(agent, tenant_id=tenant_id, agent_id=agent_id, api_url=api_url, api_key=api_key)
     _wrap_agent_tools(agent, tracer)
@@ -381,6 +393,9 @@ def instrument_anthropic(
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
+    data_handling_tool_arguments: str | None = None,
+    data_handling_prompts: str | None = None,
+    data_handling_salt: str | None = None,
 ) -> dict[str, Any]:
     """Instrument tool functions for use in an Anthropic Claude agentic loop.
 
@@ -431,6 +446,9 @@ def instrument_anthropic(
         environment,
         enforcement_trace_id,
         event_ingest_token,
+        data_handling_tool_arguments,
+        data_handling_prompts,
+        data_handling_salt,
     )
     # Keep top-level copy semantics from previous SDK behavior.
     copied = dict(tool_fns)
@@ -472,6 +490,9 @@ def instrument_openai(
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
+    data_handling_tool_arguments: str | None = None,
+    data_handling_prompts: str | None = None,
+    data_handling_salt: str | None = None,
 ) -> dict[str, Any]:
     """Instrument tool functions for use in an OpenAI tool-calling loop.
 
@@ -522,6 +543,9 @@ def instrument_openai(
         environment,
         enforcement_trace_id,
         event_ingest_token,
+        data_handling_tool_arguments,
+        data_handling_prompts,
+        data_handling_salt,
     )
     # Keep top-level copy semantics from previous SDK behavior.
     copied = dict(tool_fns)
@@ -563,6 +587,9 @@ def instrument_toolchain(
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
+    data_handling_tool_arguments: str | None = None,
+    data_handling_prompts: str | None = None,
+    data_handling_salt: str | None = None,
     include_private: bool = False,
     max_depth: int | None = None,
 ) -> Any:
@@ -599,6 +626,9 @@ def instrument_toolchain(
         environment,
         enforcement_trace_id,
         event_ingest_token,
+        data_handling_tool_arguments,
+        data_handling_prompts,
+        data_handling_salt,
     )
     return _instrument_toolchain_node(
         toolchain,
@@ -660,6 +690,9 @@ def instrument_claude_agent_sdk(
     environment: str | None = None,
     enforcement_trace_id: str | None = None,
     event_ingest_token: str | None = None,
+    data_handling_tool_arguments: str | None = None,
+    data_handling_prompts: str | None = None,
+    data_handling_salt: str | None = None,
     emit_tool_lifecycle_hooks: bool = True,
 ) -> Any:
     """Instrument ``claude-agent-sdk`` options with Thoth governance.
@@ -699,6 +732,9 @@ def instrument_claude_agent_sdk(
         environment,
         enforcement_trace_id,
         event_ingest_token,
+        data_handling_tool_arguments,
+        data_handling_prompts,
+        data_handling_salt,
     )
     return instrument_claude_agent_sdk_options(
         options,
