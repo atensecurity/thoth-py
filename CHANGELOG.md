@@ -6,6 +6,16 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ### Added
 
+- `thoth.report_usage(prompt_tokens, completion_tokens, cost_usd=None)` and
+  `thoth.report_usage_from(response)` report the model usage behind a governed call, so a
+  workspace's daily budget for the agent has something to count. The SDK adds what you reported
+  to the next governed call as `prompt_tokens`, `completion_tokens` and, only if you passed it,
+  `estimated_cost_usd`, then forgets it (sent once; resent if the call did not reach the server).
+  Tokens first: Thoth never works dollars out from tokens. Negative, non-finite and non-number
+  values are ignored with a warning and never raised; one report is capped at 10,000,000 tokens
+  and $1,000. Pending usage is process-wide. `report_usage_from` reads OpenAI-style
+  (`prompt_tokens`, `completion_tokens`) and Anthropic-style (`input_tokens`, `output_tokens`)
+  `usage` blocks. Additive: nothing changes unless you call it.
 - Opt-in withholding of values at the source. Set `data_handling_tool_arguments`
   (`hash`, `redact` or `drop`) and `data_handling_prompts` (`hash` or `drop`) on
   `init()`, the `instrument*()` functions or `ThothConfig`, or the environment

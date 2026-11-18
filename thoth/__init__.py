@@ -18,6 +18,7 @@ from thoth.integrations.langgraph import (
     instrument_tool_node,
     thoth_graph,
 )
+from thoth.usage import report_usage, report_usage_from
 
 try:
     __version__ = version("atensec-thoth")
@@ -39,6 +40,8 @@ __all__ = [
     "instrument_openai",
     "instrument_tool_node",
     "instrument_toolchain",
+    "report_usage",
+    "report_usage_from",
     "shutdown",
     "thoth_graph",
     "toolchain_function_map",

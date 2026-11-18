@@ -13,6 +13,7 @@ from thoth.http_diagnostics import auth_failure_hint, extract_http_error_detail
 from thoth.local_scan import load_scanner
 from thoth.logging_config import configure_thoth_logging_from_env
 from thoth.models import DecisionType, EnforcementDecision, HumanExplanation, ThothConfig
+from thoth.usage import restore_pending_usage, take_pending_usage
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,7 @@ class EnforcerClient:
         tool_calls: list[str],
         tool_args: dict[str, Any] | None = None,
         action_attestation_id: str | None = None,
+        usage: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         trace_id = self._config.enforcement_trace_id or session_id
         attestation_id = action_attestation_id or self._config.action_attestation_id or str(uuid.uuid4())
@@ -135,6 +137,9 @@ class EnforcerClient:
             payload["metadata"] = metadata
         if tool_args is not None:
             payload["tool_args"] = tool_args
+        if usage:
+            # Model usage reported with thoth.report_usage(), sent once (usage.py).
+            payload.update(usage)
         if self._config.session_intent is not None:
             payload["session_intent"] = self._config.session_intent
         if self._config.purpose is not None:
@@ -211,6 +216,7 @@ class EnforcerClient:
         action_attestation_id: str | None = None,
     ) -> EnforcementDecision:
         """Synchronous enforce call. Returns fallback decision on errors."""
+        usage = take_pending_usage()
         try:
             resp = self._http.post(
                 "/v1/enforce",
@@ -220,12 +226,16 @@ class EnforcerClient:
                     tool_calls,
                     tool_args=tool_args,
                     action_attestation_id=action_attestation_id,
+                    usage=usage,
                 ),
             )
             resp.raise_for_status()
             return EnforcementDecision.model_validate(resp.json())
         except httpx.HTTPStatusError as exc:
             response = exc.response
+            if _is_retryable_status(response.status_code):
+                # The server may not have counted this call: send its usage with the next one.
+                restore_pending_usage(usage)
             billing = _billing_decision(response)
             if billing is not None:
                 return billing
@@ -251,6 +261,7 @@ class EnforcerClient:
             )
             return _blocked_with_reason(f"enforcer rejected request (status={response.status_code})")
         except Exception:
+            restore_pending_usage(usage)
             if self._config.resolved_fail_open:
                 logger.warning(
                     "thoth: enforcer unreachable, fail-open fallback to ALLOW for tool=%s",
@@ -274,6 +285,7 @@ class EnforcerClient:
         action_attestation_id: str | None = None,
     ) -> EnforcementDecision:
         """Async enforce call. Returns fallback decision on errors."""
+        usage = take_pending_usage()
         try:
             resp = await self._async_http.post(
                 "/v1/enforce",
@@ -283,12 +295,16 @@ class EnforcerClient:
                     tool_calls,
                     tool_args=tool_args,
                     action_attestation_id=action_attestation_id,
+                    usage=usage,
                 ),
             )
             resp.raise_for_status()
             return EnforcementDecision.model_validate(resp.json())
         except httpx.HTTPStatusError as exc:
             response = exc.response
+            if _is_retryable_status(response.status_code):
+                # The server may not have counted this call: send its usage with the next one.
+                restore_pending_usage(usage)
             billing = _billing_decision(response)
             if billing is not None:
                 return billing
@@ -314,6 +330,7 @@ class EnforcerClient:
             )
             return _blocked_with_reason(f"enforcer rejected request (status={response.status_code})")
         except Exception:
+            restore_pending_usage(usage)
             if self._config.resolved_fail_open:
                 logger.warning(
                     "thoth: enforcer unreachable (async), fail-open fallback to ALLOW for tool=%s",

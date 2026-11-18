@@ -17,7 +17,7 @@ import pytest
 pytest.importorskip("strands")
 
 import thoth
-from thoth import auto, step_up
+from thoth import auto, step_up, usage
 
 REFERENCE = Path(__file__).resolve().parents[6] / "platform" / "public" / "thoth-agentcore-reference"
 
@@ -50,6 +50,7 @@ class FakeThoth:
     def __init__(self, executed):
         self.executed = executed
         self.checks = []
+        self.bodies = []
         self.decisions = {}
         self.ran_when_first_polled = None
         self.polls = 0
@@ -59,6 +60,7 @@ class FakeThoth:
         if request.url.path == "/v1/enforce":
             body = json.loads(request.content)
             self.checks.append(body["tool_name"])
+            self.bodies.append(body)
             decision = self.decisions.get(body["tool_name"], "ALLOW")
             payload = {"decision": decision, "reason": f"{decision} by test policy"}
             if decision == "STEP_UP":
@@ -96,6 +98,8 @@ def server(monkeypatch, reference):
     # Do not sit out the five-second poll interval; the hold is still polled twice.
     monkeypatch.setattr(step_up, "asyncio", SimpleNamespace(sleep=no_wait))
     monkeypatch.setattr(step_up, "time", SimpleNamespace(monotonic=step_up.time.monotonic, sleep=lambda _s: None))
+    while usage.take_pending_usage() is not None:  # usage is process-wide: start each test with none pending
+        pass
     reference.agent.start_governance(local=False)
     yield fake
     thoth.shutdown()
@@ -117,6 +121,14 @@ def test_an_allowed_call_runs(reference, server):
     assert "cardiology follow-up" in ask(reference, "list appointments")
     assert reference.tools.executed == ["lookup_appointments:P-1001"]
     assert server.checks == ["lookup_appointments"]
+
+
+def test_the_stub_model_reports_its_fixed_usage_with_the_governed_call(reference, server):
+    ask(reference, "list appointments")
+    first = server.bodies[0]
+    # The stub's fixed, not measured, counts for the model call that chose the tool.
+    assert (first["prompt_tokens"], first["completion_tokens"]) == (180, 40)
+    assert "estimated_cost_usd" not in first
 
 
 def test_a_denied_call_never_runs_and_the_agent_is_told(reference, server):
