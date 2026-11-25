@@ -2,7 +2,7 @@
  "spec": "thoth-detectors-golden",
  "spec_version": 1,
  "ruleset_id": "thoth-detectors.v1",
- "ruleset_hash": "db797fde60f300719b9dac8a360efd6ce8b1f7313587cc714aebf7a93428434b",
+ "ruleset_hash": "9e7e25ec9d1f280b12f6006726cfc9efdaf5a0dc24585b08eb513e140ff3ae46",
  "how_to_use": "For each case run your scanner on tool_name, arguments and (when present) metadata, and compare scanned and findings exactly (order included) with 'expected'. Cases with source 'server' were generated from the enforcer; 'spec' cases express a rule the server does not apply (scanner bounds). Group 'known_divergence' records what the Python server answers for text where Unicode and ASCII regex semantics differ; skip it for conformance.",
  "cases": [
   {
@@ -839,6 +839,833 @@
    }
   },
   {
+   "id": "dlp.mrn_label_colon",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "MRN: 12345678"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "mrn",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.mrn_label_hash_and_letters",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "mrn # AB-123456"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "mrn",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.mrn_medical_record_number",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "Medical Record Number: 00123456"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "mrn",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.mrn_patient_id_is",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "patient id is A1234567"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "mrn",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.mrn_chart_number_quoted",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "chart number \"98765432\""
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "mrn",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.mrn_json_text",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "{\"mrn\": \"A1234567\"}"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "mrn",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.mrn_two_in_one_leaf",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "MRN 1234567 and MRN 7654321"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "mrn",
+      "count": 2
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.mrn_label_without_value",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "MRN is required for intake"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.mrn_label_with_word_value",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "medical record number following"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.mrn_short_value",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "MRN: 1234"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.mrn_value_without_label",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "id 12345678 and ticket A1234567"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.mrn_label_part_of_word",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "mrnx12345678 and amrn 12345678"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.mrn_snake_case_label",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "patient_mrn_12345678"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.mrn_version_string",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "patient id 1.2.3"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.mrn_phone_after_label",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "patient id 555-123-4567"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "phone",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.dob_iso",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "DOB: 1985-03-14"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "dob",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.dob_us_slashes",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "dob 03/14/1985"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "dob",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.dob_eu_dots",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "Date of birth: 14.03.1985"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "dob",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.dob_month_name_us",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "born March 14, 1985"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "dob",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.dob_month_name_eu",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "Birth date: 14th of March 1985"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "dob",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.dob_abbreviated_month",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "birthdate = Mar. 14 1985"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "dob",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.dob_iso_timestamp",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "birthDate: 1985-03-14T00:00:00Z"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "dob",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.dob_born_on",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "She was born on 1990-01-02."
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "dob",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.dob_born_in_prose",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "born in Boston and raised in Ohio"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.dob_born_year_only",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "born in 1985"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.dob_date_without_label",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "meeting on 03/14/1985 and 1985-03-14"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.dob_log_timestamp",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "2026-11-08T10:15:30Z INFO started born=true"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.dob_future_year",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "DOB: 2031-01-01"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.dob_year_before_1900",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "DOB: 1850-01-01"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.dob_impossible_month",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "DOB: 1985-13-45"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.dob_two_digit_year",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "DOB: 03/14/85"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.dob_label_part_of_word",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "user_dob 1985-03-14 and adobe 1985-03-14"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.dob_version_after_label",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "born 1.2.3"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.dob_digits_run_on",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "DOB: 1985-03-141"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.mrn_and_dob_together",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "MRN 12345678, DOB 1985-03-14"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "mrn",
+      "count": 1
+     },
+     {
+      "kind": "dlp",
+      "category": "dob",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.mrn_four_spaces_after_label_is_missed",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "MRN    12345678"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "mrn",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.email_local_part_64",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.com"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "email",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "dlp.email_local_part_65_is_missed",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.com"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": []
+   }
+  },
+  {
+   "id": "dlp.email_dotted_local_part_long",
+   "group": "dlp",
+   "tool_name": "tool",
+   "arguments": {
+    "text": "a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.a.b@example.com"
+   },
+   "source": "server",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "email",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
    "id": "dlp.nested_leaves",
    "group": "dlp",
    "tool_name": "tool",
@@ -1103,6 +1930,81 @@
      {
       "kind": "dlp",
       "category": "ssn",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "known_divergence.nbsp_between_label_and_date",
+   "group": "known_divergence",
+   "tool_name": "tool",
+   "arguments": {
+    "t": "DOB: 1985-03-14"
+   },
+   "source": "server",
+   "note": "Python \\s matches U+00A0, so the date after the label is found. Engines that read \\s as ASCII (Go, Rust) count 0; JavaScript counts what its own \\s matches.",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "dob",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "known_divergence.arabic_indic_digit_mrn",
+   "group": "known_divergence",
+   "tool_name": "tool",
+   "arguments": {
+    "t": "MRN: ١23456"
+   },
+   "source": "server",
+   "note": "Python \\d matches the Arabic-Indic digit that starts the identifier. ASCII engines count 0.",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "mrn",
+      "count": 1
+     }
+    ]
+   }
+  },
+  {
+   "id": "known_divergence.fullwidth_digits_dob",
+   "group": "known_divergence",
+   "tool_name": "tool",
+   "arguments": {
+    "t": "DOB: 19８５-03-14"
+   },
+   "source": "server",
+   "note": "Python \\d matches the fullwidth digits in the year. ASCII engines count 0.",
+   "expected": {
+    "scanned": [
+     "dlp",
+     "sensitive_path",
+     "egress_host",
+     "recipient"
+    ],
+    "findings": [
+     {
+      "kind": "dlp",
+      "category": "dob",
       "count": 1
      }
     ]

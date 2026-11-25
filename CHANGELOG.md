@@ -6,6 +6,17 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ### Added
 
+- Local scan detects labelled medical record numbers and labelled dates of birth in tool
+  arguments: two new `dlp` categories, `mrn` and `dob`, reported as a category and a count (the
+  matched text is never kept or sent). A match needs a label next to the value: `MRN`, `medical
+  record number`, `patient id` or `chart number` followed by an identifier; `DOB`, `date of birth`,
+  `birthdate`, `birthday` or `born` followed by an ISO, numeric day-month-year or written-month
+  date with a year from 1900 to 2026. A bare number or a bare date is not matched. These are
+  pattern detectors: they have false positives (for example a UUID right after `patient id`) and
+  false negatives (for example `user_dob`, two-digit years, or a date later in 2026), and they make
+  no compliance or PHI claim. The detector set's `ruleset_hash` changes to `9e7e25ec9d1f280b12f6006726cfc9efdaf5a0dc24585b08eb513e140ff3ae46`: workspace
+  owners add it to `accepted_scanner_ruleset_hashes` before relying on a client that sends it. The email detector's quantifiers are now bounded (local part up to 64 characters, domain up to 253), so scanning long text is linear; an address whose local part is one run of more than 64 letters or digits is no longer matched. On the server, `mrn` and `dob` are findings only (rule conditions, evidence): the server does not redact them from what a tool receives unless redaction for them is switched on, which is an explicit workspace choice.
+
 - `thoth.report_usage(prompt_tokens, completion_tokens, cost_usd=None)` and
   `thoth.report_usage_from(response)` report the model usage behind a governed call, so a
   workspace's daily budget for the agent has something to count. The SDK adds what you reported
