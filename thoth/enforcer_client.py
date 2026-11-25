@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import threading
 from typing import Any
@@ -26,6 +27,20 @@ _FAIL_OPEN_FALLBACK = EnforcementDecision(
     decision=DecisionType.ALLOW,
     reason="enforcer unavailable (fail-open)",
 )
+
+
+# The enforcer's default request limit. A body over it is refused locally and never sent:
+# the server answers 413 but may reset the connection while the client is still uploading,
+# which would look like a transport failure, and fail-open treats that as allow.
+MAX_REQUEST_BYTES = 4 * 1024 * 1024
+REQUEST_TOO_LARGE_REASON = (
+    "enforcer_request_too_large: the request is larger than the enforcer accepts, so the action is not allowed; "
+    "use smaller tool arguments or ask a reviewer for a held action"
+)
+
+
+def _encode_request(payload: dict[str, Any]) -> bytes:
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
 def _blocked_with_reason(reason: str) -> EnforcementDecision:
@@ -218,16 +233,23 @@ class EnforcerClient:
         """Synchronous enforce call. Returns fallback decision on errors."""
         usage = take_pending_usage()
         try:
-            resp = self._http.post(
-                "/v1/enforce",
-                json=self._payload(
+            body = _encode_request(
+                self._payload(
                     tool_name,
                     session_id,
                     tool_calls,
                     tool_args=tool_args,
                     action_attestation_id=action_attestation_id,
                     usage=usage,
-                ),
+                )
+            )
+            if len(body) > MAX_REQUEST_BYTES:
+                restore_pending_usage(usage)
+                return _blocked_with_reason(REQUEST_TOO_LARGE_REASON)
+            resp = self._http.post(
+                "/v1/enforce",
+                content=body,
+                headers={"Content-Type": "application/json"},
             )
             resp.raise_for_status()
             return EnforcementDecision.model_validate(resp.json())
@@ -287,16 +309,23 @@ class EnforcerClient:
         """Async enforce call. Returns fallback decision on errors."""
         usage = take_pending_usage()
         try:
-            resp = await self._async_http.post(
-                "/v1/enforce",
-                json=self._payload(
+            body = _encode_request(
+                self._payload(
                     tool_name,
                     session_id,
                     tool_calls,
                     tool_args=tool_args,
                     action_attestation_id=action_attestation_id,
                     usage=usage,
-                ),
+                )
+            )
+            if len(body) > MAX_REQUEST_BYTES:
+                restore_pending_usage(usage)
+                return _blocked_with_reason(REQUEST_TOO_LARGE_REASON)
+            resp = await self._async_http.post(
+                "/v1/enforce",
+                content=body,
+                headers={"Content-Type": "application/json"},
             )
             resp.raise_for_status()
             return EnforcementDecision.model_validate(resp.json())

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import httpx
 
-from thoth.enforcer_client import EnforcerClient
+from thoth.enforcer_client import MAX_REQUEST_BYTES, EnforcerClient
 from thoth.models import ThothConfig
 
 
@@ -64,6 +64,21 @@ def test_fail_open_still_blocks_on_auth_failure() -> None:
     assert "status=403" in (decision.reason or "")
 
 
+def test_request_too_large_blocks_even_when_fail_open() -> None:
+    """413 is the enforcer refusing an oversized request: not an outage, so it never fails open."""
+    request = httpx.Request("POST", "https://enforce.example.com/v1/enforce")
+    response = httpx.Response(413, request=request, json={"error": "request_too_large", "limit_bytes": 4194304})
+
+    for fail_open in (True, False):
+        client = EnforcerClient(_config(fail_open=fail_open))
+        client._http = _StubHTTPClient(response=response)  # type: ignore[assignment]
+
+        decision = client.check("read:data", session_id="sess-1", tool_calls=[])
+
+        assert decision.is_block
+        assert "status=413" in (decision.reason or "")
+
+
 def _billing_response() -> httpx.Response:
     request = httpx.Request("POST", "https://enforce.example.com/v1/enforce")
     body = {
@@ -99,3 +114,18 @@ def test_a_402_without_a_billing_error_is_an_ordinary_rejection() -> None:
 
     assert decision.is_block
     assert "status=402" in (decision.reason or "")
+
+
+def test_oversized_request_blocks_locally_and_never_sends_even_when_fail_open() -> None:
+    class _Raises:
+        def post(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise AssertionError("an oversized request must not be sent")
+
+    for fail_open in (True, False):
+        client = EnforcerClient(_config(fail_open=fail_open))
+        client._http = _Raises()  # type: ignore[assignment]
+
+        decision = client.check("read:data", session_id="sess-1", tool_calls=[], tool_args={"blob": "a" * (MAX_REQUEST_BYTES + 1)})
+
+        assert decision.is_block
+        assert "enforcer_request_too_large" in (decision.reason or "")
