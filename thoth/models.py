@@ -364,6 +364,9 @@ class EnforcementDecision(BaseModel):
         if not raw:
             raw = payload.get("authorization_decision")
         key = str(raw or "").strip().upper()
+        if not key:
+            # A missing or null decision is a contract failure, not a silent BLOCK.
+            raise ValueError("decision is missing")
         payload["decision"] = _DECISION_ALIASES.get(key, DecisionType.BLOCK)
         # The enforcer carries an argument modification as decision=ALLOW next to
         # authorization_decision=MODIFY. Routing on decision alone would run the

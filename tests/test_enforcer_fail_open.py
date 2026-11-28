@@ -154,6 +154,8 @@ def _ok_response(**kwargs) -> httpx.Response:  # noqa: ANN003
 
 _UNPARSEABLE_BODIES = {
     "decision_not_a_string": {"json": {"decision": 5}},
+    "decision_true": {"json": {"decision": True}},
+    "decision_null": {"json": {"decision": None}},
     "numeric_string_for_number": {"json": {"decision": "ALLOW", "risk_score": "5"}},
     "string_for_int": {"json": {"decision": "ALLOW", "step_up_timeout_seconds": "60"}},
     "unknown_decision": {"json": {"decision": "NOPE"}},
@@ -166,7 +168,7 @@ _UNPARSEABLE_BODIES = {
 
 
 # The model already turns these into BLOCK itself; they stay here as regression guards.
-_NORMALISED_BY_MODEL = {"unknown_decision", "empty_object"}
+_NORMALISED_BY_MODEL = {"unknown_decision"}
 
 
 def _drain_usage() -> None:
