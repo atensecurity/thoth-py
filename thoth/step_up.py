@@ -41,7 +41,7 @@ def _coerce_hold_payload(payload: Any) -> EnforcementDecision:
 
         # Canonical hold-token payload:
         # {resolved: bool, resolution: "ALLOW"|"BLOCK"|...}
-        if bool(payload.get("resolved")):
+        if payload.get("resolved") is True:
             resolution = payload.get("resolution")
             if isinstance(resolution, str) and resolution.strip():
                 resolved_payload = dict(payload)

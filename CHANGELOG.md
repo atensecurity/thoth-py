@@ -16,9 +16,25 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ### Fixed
 
+- A successful (2xx) enforcer response the SDK cannot read, such as a body that is not valid
+  JSON or has a field of the wrong type (a number sent as a string, for one), now blocks the call with the reason `enforcer response
+  not understood`, whether or not fail-open is on. Before, fail-open read it as an enforcer
+  outage and allowed the call. Fail-open still covers only network failures, 429 and 5xx.
+- A call whose request cannot be built, because the tool arguments hold a value that is not valid
+  JSON (NaN or Infinity, a datetime, bytes or a set) or are nested too deeply, is now blocked with the reason `request
+  could not be built`, whether or not fail-open is on, and its reported usage is kept for the next
+  call. Before, fail-open read it as an enforcer outage and allowed the call although nothing was
+  sent.
+- A step-up hold counts as resolved only when the enforcer returns JSON `true` for `resolved`. A
+  string such as `"false"`, a number or null no longer resolves the hold; the SDK keeps polling
+  until the step-up timeout blocks the call.
 - With the Anthropic Python package older than 1.0, `thoth.init()` no longer raises. It logs a
   warning that Anthropic tools are not governed and to upgrade to 1.x; other frameworks are still
   governed.
+
+### Known limits
+
+In observe mode a request that cannot be built (a non-finite number, an unserialisable value, arguments nested too deeply) is not sent and leaves no record: it appears nowhere in the would-have-blocked summary.
 
 ### Added
 
@@ -31,7 +47,7 @@ All notable changes to `atensec-thoth` are documented in this file.
   pattern detectors: they have false positives (for example a UUID right after `patient id`) and
   false negatives (for example `user_dob`, two-digit years, or a year after 2026), and they make
   no compliance or PHI claim. The detector set's `ruleset_hash` is `9e7e25ec9d1f280b12f6006726cfc9efdaf5a0dc24585b08eb513e140ff3ae46`: workspace
-  owners add it to `accepted_scanner_ruleset_hashes` before relying on a client that sends it. The email detector's quantifiers are now bounded (local part up to 64 characters, domain up to 253), so scanning long text is linear; an address whose local part is one run of more than 64 letters or digits is no longer matched. The scan runs in your process; the server side needs the matching Thoth platform release. There `mrn` and `dob` are findings only (rule conditions, evidence): the server does not redact them from what a tool receives unless redaction for them is switched on, which is an explicit workspace choice. An enforcer from before that release does not accept these two categories in a report.
+  owners add it to `accepted_scanner_ruleset_hashes` before relying on a client that sends it. The email detector's quantifiers are now bounded (local part up to 64 characters, domain up to 253), so scanning long text is linear; an address whose local part is one run of more than 64 letters or digits is no longer matched. The scan runs in your process; the server side needs the matching Thoth platform release. There `mrn` and `dob` are findings only (rule conditions, evidence): the server does not redact them from what a tool receives unless redaction for them is switched on, which is an explicit workspace choice. An enforcer built between 8 and 24 November rejects a report containing `mrn` or `dob` with a 422, because it only knows the original five categories, and the SDK blocks that call even with fail-open on. An older enforcer ignores the report. The matching platform release accepts and evaluates it.
 
 - `thoth.report_usage(prompt_tokens, completion_tokens, cost_usd=None)` and
   `thoth.report_usage_from(response)` report the model usage behind a governed call, so a
@@ -54,6 +70,9 @@ All notable changes to `atensec-thoth` are documented in this file.
   call fails closed (the tool does not run, `ThothPolicyViolation`) because that
   is a server or contract problem. Nothing changes when unset; an invalid
   value raises when the client is created.
+  This needs the matching Thoth platform release: an enforcer without it evaluates hashed or
+  redacted arguments as if they were the real values, so rules on argument values would not hold
+  the call and it could be allowed.
 - Local scanning when tool arguments are withheld. With
   `data_handling_tool_arguments` set to `hash`, `redact` or `drop`, the SDK scans the
   raw arguments (and the destination host in `request_metadata`) in your process

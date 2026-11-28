@@ -256,6 +256,10 @@ class ThothConfig(BaseModel):
 
 
 class EnforcementDecision(BaseModel):
+    # Strict: a reply whose field has the wrong type (a string for a number) is a contract
+    # mismatch, not something to coerce. Unknown extra fields are still ignored.
+    model_config = ConfigDict(strict=True)
+
     decision: DecisionType
     decision_envelope_version: str | None = None
     enforcement_trace_id: str | None = None
@@ -355,6 +359,8 @@ class EnforcementDecision(BaseModel):
         if payload.get("terminal_receipt") is None and payload.get("terminalReceipt") is not None:
             payload["terminal_receipt"] = payload.get("terminalReceipt")
         raw = payload.get("decision")
+        if raw is not None and not isinstance(raw, str | DecisionType):
+            raise ValueError("decision must be a string")
         if not raw:
             raw = payload.get("authorization_decision")
         key = str(raw or "").strip().upper()

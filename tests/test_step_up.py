@@ -4,7 +4,7 @@ import pytest
 import respx
 
 from thoth.models import ThothConfig
-from thoth.step_up import StepUpClient
+from thoth.step_up import StepUpClient, _coerce_hold_payload
 
 
 @pytest.fixture
@@ -183,3 +183,14 @@ def test_hold_poll_sends_the_key_in_both_auth_headers():
     request = route.calls.last.request
     assert request.headers["x-api-key"] == "key-123"
     assert request.headers["authorization"] == "Bearer key-123"
+
+
+@pytest.mark.parametrize("resolved", ["false", "true", "yes", 1, 0, None, [], {}])
+def test_only_json_true_counts_as_resolved(resolved):
+    """A string, number or null is not `resolved`: polling continues until the timeout blocks."""
+    decision = _coerce_hold_payload({"resolved": resolved, "resolution": "ALLOW"})
+    assert decision.is_step_up
+
+
+def test_json_true_resolves():
+    assert _coerce_hold_payload({"resolved": True, "resolution": "ALLOW"}).is_allow

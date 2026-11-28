@@ -33,6 +33,8 @@ _FAIL_OPEN_FALLBACK = EnforcementDecision(
 # the server answers 413 but may reset the connection while the client is still uploading,
 # which would look like a transport failure, and fail-open treats that as allow.
 MAX_REQUEST_BYTES = 4 * 1024 * 1024
+REQUEST_NOT_BUILT_REASON = "request could not be built"
+RESPONSE_NOT_UNDERSTOOD_REASON = "enforcer response not understood"
 REQUEST_TOO_LARGE_REASON = (
     "enforcer_request_too_large: the request is larger than the enforcer accepts, so the action is not allowed; "
     "use smaller tool arguments or ask a reviewer for a held action"
@@ -49,6 +51,47 @@ def _blocked_with_reason(reason: str) -> EnforcementDecision:
 
 def _allowed_with_reason(reason: str) -> EnforcementDecision:
     return EnforcementDecision(decision=DecisionType.ALLOW, reason=reason)
+
+
+def _parse_decision(resp: httpx.Response, tool_name: str) -> EnforcementDecision:
+    """Read a 2xx enforce response. A body the SDK cannot read is a contract failure, not an outage.
+
+    fail_open covers enforcer infrastructure failures only (network, 429, 5xx), so an unreadable
+    success response blocks in both modes. The body is never logged: it can hold arbitrary content.
+    """
+    try:
+        return EnforcementDecision.model_validate(resp.json())
+    except Exception as exc:
+        # The server answered 2xx, so it processed the call and counted its usage: no restore.
+        logger.error(
+            "thoth: enforcer response not understood (status=%s error=%s), blocking tool=%s",
+            resp.status_code,
+            type(exc).__name__,
+            tool_name,
+        )
+        return _blocked_with_reason(RESPONSE_NOT_UNDERSTOOD_REASON)
+
+
+def _unbuildable_request(exc: Exception, usage: dict[str, Any] | None, tool_name: str) -> EnforcementDecision:
+    """The request could not be encoded (NaN, a datetime, bytes, a set): a caller bug, not an outage.
+
+    Nothing was sent, so fail-open does not apply and the usage goes with the next call. Only the
+    exception class is logged: the arguments can hold anything.
+    """
+    restore_pending_usage(usage)
+    logger.error(
+        "thoth: request could not be built (error=%s), blocking tool=%s",
+        type(exc).__name__,
+        tool_name,
+    )
+    return _blocked_with_reason(REQUEST_NOT_BUILT_REASON)
+
+
+def _status_block_reason(status_code: int) -> str:
+    """429 and 5xx are an outage, not a rejection of the request."""
+    if _is_retryable_status(status_code):
+        return f"enforcer unavailable (status={status_code})"
+    return f"enforcer rejected request (status={status_code})"
 
 
 def _is_retryable_status(status_code: int) -> bool:
@@ -243,6 +286,9 @@ class EnforcerClient:
                     usage=usage,
                 )
             )
+        except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+            return _unbuildable_request(exc, usage, tool_name)
+        try:
             if len(body) > MAX_REQUEST_BYTES:
                 restore_pending_usage(usage)
                 return _blocked_with_reason(REQUEST_TOO_LARGE_REASON)
@@ -252,7 +298,7 @@ class EnforcerClient:
                 headers={"Content-Type": "application/json"},
             )
             resp.raise_for_status()
-            return EnforcementDecision.model_validate(resp.json())
+            return _parse_decision(resp, tool_name)
         except httpx.HTTPStatusError as exc:
             response = exc.response
             if _is_retryable_status(response.status_code):
@@ -281,7 +327,7 @@ class EnforcerClient:
                 f" hint={hint}" if hint else "",
                 exc_info=True,
             )
-            return _blocked_with_reason(f"enforcer rejected request (status={response.status_code})")
+            return _blocked_with_reason(_status_block_reason(response.status_code))
         except Exception:
             restore_pending_usage(usage)
             if self._config.resolved_fail_open:
@@ -319,6 +365,9 @@ class EnforcerClient:
                     usage=usage,
                 )
             )
+        except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+            return _unbuildable_request(exc, usage, tool_name)
+        try:
             if len(body) > MAX_REQUEST_BYTES:
                 restore_pending_usage(usage)
                 return _blocked_with_reason(REQUEST_TOO_LARGE_REASON)
@@ -328,7 +377,7 @@ class EnforcerClient:
                 headers={"Content-Type": "application/json"},
             )
             resp.raise_for_status()
-            return EnforcementDecision.model_validate(resp.json())
+            return _parse_decision(resp, tool_name)
         except httpx.HTTPStatusError as exc:
             response = exc.response
             if _is_retryable_status(response.status_code):
@@ -357,7 +406,7 @@ class EnforcerClient:
                 f" hint={hint}" if hint else "",
                 exc_info=True,
             )
-            return _blocked_with_reason(f"enforcer rejected request (status={response.status_code})")
+            return _blocked_with_reason(_status_block_reason(response.status_code))
         except Exception:
             restore_pending_usage(usage)
             if self._config.resolved_fail_open:
