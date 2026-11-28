@@ -4,6 +4,22 @@ All notable changes to `atensec-thoth` are documented in this file.
 
 ## Unreleased
 
+## 0.8.0 - 2026-11-28
+
+### Changed
+
+- A request larger than 4 MiB, the enforcer's default limit, is refused in the SDK before it is
+  sent: the call is blocked with the reason `enforcer_request_too_large` and the tool does not run,
+  whether or not fail-open is on. Before, the enforcer's refusal could arrive as a dropped
+  connection, which fail-open read as an allow. Use smaller tool arguments or ask a reviewer for a
+  held action. This check is in the SDK and needs no enforcer change.
+
+### Fixed
+
+- With the Anthropic Python package older than 1.0, `thoth.init()` no longer raises. It logs a
+  warning that Anthropic tools are not governed and to upgrade to 1.x; other frameworks are still
+  governed.
+
 ### Added
 
 - Local scan detects labelled medical record numbers and labelled dates of birth in tool
@@ -13,9 +29,9 @@ All notable changes to `atensec-thoth` are documented in this file.
   `birthdate`, `birthday` or `born` followed by an ISO, numeric day-month-year or written-month
   date with a year from 1900 to 2026. A bare number or a bare date is not matched. These are
   pattern detectors: they have false positives (for example a UUID right after `patient id`) and
-  false negatives (for example `user_dob`, two-digit years, or a date later in 2026), and they make
-  no compliance or PHI claim. The detector set's `ruleset_hash` changes to `9e7e25ec9d1f280b12f6006726cfc9efdaf5a0dc24585b08eb513e140ff3ae46`: workspace
-  owners add it to `accepted_scanner_ruleset_hashes` before relying on a client that sends it. The email detector's quantifiers are now bounded (local part up to 64 characters, domain up to 253), so scanning long text is linear; an address whose local part is one run of more than 64 letters or digits is no longer matched. On the server, `mrn` and `dob` are findings only (rule conditions, evidence): the server does not redact them from what a tool receives unless redaction for them is switched on, which is an explicit workspace choice.
+  false negatives (for example `user_dob`, two-digit years, or a year after 2026), and they make
+  no compliance or PHI claim. The detector set's `ruleset_hash` is `9e7e25ec9d1f280b12f6006726cfc9efdaf5a0dc24585b08eb513e140ff3ae46`: workspace
+  owners add it to `accepted_scanner_ruleset_hashes` before relying on a client that sends it. The email detector's quantifiers are now bounded (local part up to 64 characters, domain up to 253), so scanning long text is linear; an address whose local part is one run of more than 64 letters or digits is no longer matched. The scan runs in your process; the server side needs the matching Thoth platform release. There `mrn` and `dob` are findings only (rule conditions, evidence): the server does not redact them from what a tool receives unless redaction for them is switched on, which is an explicit workspace choice. An enforcer from before that release does not accept these two categories in a report.
 
 - `thoth.report_usage(prompt_tokens, completion_tokens, cost_usd=None)` and
   `thoth.report_usage_from(response)` report the model usage behind a governed call, so a
@@ -44,10 +60,10 @@ All notable changes to `atensec-thoth` are documented in this file.
   before withholding them, and sends `client_findings` next to `data_handling`:
   counts and categories of credentials, email addresses, phone numbers, SSN-shaped
   numbers and confidentiality phrases, whether a path looks sensitive, a destination
-  hostname, and recipient domains. The report never contains values, paths, local
+  hostname, and recipient domains. The enforcer must be on a Thoth platform release that accepts `client_findings`. The report never contains values, paths, local
   parts or display names. The detectors are heuristic. The scanner identifies itself
   as `atensec-thoth` with ruleset `thoth-detectors.v1`, ruleset hash
-  `db797fde60f300719b9dac8a360efd6ce8b1f7313587cc714aebf7a93428434b`; a workspace
+  `9e7e25ec9d1f280b12f6006726cfc9efdaf5a0dc24585b08eb513e140ff3ae46`; a workspace
   relies on the report only after it sets `accept_local_scan` and lists that hash in
   `accepted_scanner_ruleset_hashes`. A check that fails, hits the depth or value
   bound, or would not fit the 4 KB limit is left out of `scanned` instead of
